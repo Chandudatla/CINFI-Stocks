@@ -376,8 +376,15 @@ export const SpecializedDashboards: React.FC<SpecializedDashboardsProps> = ({
     },
   ];
 
-  const isUsdAsset = chartSymbol.includes('=F') || chartSymbol === '^TNX' || chartSymbol === 'DX-Y.NYB';
-  const currencyPrefix = chartSymbol === '^TNX' || chartSymbol === 'DX-Y.NYB' ? '' : isUsdAsset ? '$' : '₹';
+  const isUsdAsset =
+    chartDetail?.currency === 'USD' ||
+    chartSymbol.includes('=F') ||
+    (!chartSymbol.endsWith('.NS') &&
+      !chartSymbol.endsWith('.BO') &&
+      !chartSymbol.startsWith('^') &&
+      chartSymbol !== 'DX-Y.NYB');
+  const currencyPrefix =
+    chartSymbol === '^TNX' || chartSymbol === 'DX-Y.NYB' ? '' : isUsdAsset ? '$' : '₹';
 
   const RANGES: Array<{ id: ChartRange; label: string }> =
     dashboardId === 'intraday'
@@ -662,7 +669,7 @@ export const SpecializedDashboards: React.FC<SpecializedDashboardsProps> = ({
             <div className="mt-1 flex flex-wrap items-center gap-3 font-mono tabular-nums">
               <span className="text-xl font-bold text-slate-900">
                 {currencyPrefix}
-                {chartDetail.price.toLocaleString('en-IN', {
+                {chartDetail.price.toLocaleString(isUsdAsset ? 'en-US' : 'en-IN', {
                   minimumFractionDigits: 2,
                   maximumFractionDigits: 2,
                 })}
@@ -958,10 +965,17 @@ export const SpecializedDashboards: React.FC<SpecializedDashboardsProps> = ({
                     ) : (
                       visibleItems.map((item: any) => {
                         const pos = item.change >= 0;
+                        const isItemUsd =
+                          item.currency === 'USD' ||
+                          item.symbol?.includes('=F') ||
+                          (!item.symbol?.endsWith('.NS') &&
+                            !item.symbol?.endsWith('.BO') &&
+                            !item.symbol?.startsWith('^') &&
+                            item.symbol !== 'DX-Y.NYB');
                         const itemPrefix =
-                          item.symbol === '^TNX'
+                          item.symbol === '^TNX' || item.symbol === 'DX-Y.NYB'
                             ? ''
-                            : item.symbol?.includes('=F')
+                            : isItemUsd
                               ? '$'
                               : '₹';
                         const isActive = item.symbol === chartSymbol;
@@ -1009,7 +1023,7 @@ export const SpecializedDashboards: React.FC<SpecializedDashboardsProps> = ({
                             </td>
                             <td className="py-3 px-3 text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">
                               {itemPrefix}
-                              {item.price.toLocaleString('en-IN', {
+                              {item.price.toLocaleString(isItemUsd ? 'en-US' : 'en-IN', {
                                 minimumFractionDigits: 2,
                                 maximumFractionDigits: 2,
                               })}

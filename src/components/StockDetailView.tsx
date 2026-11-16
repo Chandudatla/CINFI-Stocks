@@ -9,11 +9,27 @@ import {
 import { AiBriefResponse, ChartRange, StockDetail } from '../types/market';
 import {
   formatCompactVolume,
-  formatINR,
   formatSignedChange,
   formatSignedPercent,
 } from '../utils/format';
 import { PriceChart } from './PriceChart';
+
+function formatDetailPrice(
+  value: number | null | undefined,
+  currencyPrefix: string,
+  isUsd: boolean,
+  isPercentYield: boolean,
+  decimals = 2
+): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return '—';
+  }
+  const formatted = value.toLocaleString(isUsd ? 'en-US' : 'en-IN', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+  return `${currencyPrefix}${formatted}${isPercentYield ? '%' : ''}`;
+}
 
 interface StockDetailViewProps {
   symbol: string;
@@ -124,6 +140,12 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
   }, [detail, symbol]);
 
   const isPositive = (detail?.change ?? 0) >= 0;
+  const isPercentYield = detail?.symbol === '^TNX' || symbol === '^TNX';
+  const isUsdAsset =
+    detail?.currency === 'USD' ||
+    symbol.includes('=F') ||
+    (!symbol.endsWith('.NS') && !symbol.endsWith('.BO') && !symbol.startsWith('^') && symbol !== 'DX-Y.NYB');
+  const currencyPrefix = isPercentYield || symbol === 'DX-Y.NYB' ? '' : isUsdAsset ? '$' : '₹';
 
   return (
     <div className="space-y-6">
@@ -154,7 +176,7 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
                   <span aria-hidden="true">·</span>
                   <span>{detail?.exchange || 'NSE'}</span>
                   <span aria-hidden="true">·</span>
-                  <span>{detail?.currency || 'INR'}</span>
+                  <span>{detail?.currency || (isUsdAsset ? 'USD' : 'INR')}</span>
                 </div>
                 <h1 className="mt-1.5 text-2xl font-bold tracking-tight text-slate-900">
                   {detail?.name || symbol}
@@ -163,7 +185,9 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
 
               <div className="text-left sm:text-right font-mono tabular-nums">
                 <div className="text-3xl font-bold text-slate-900">
-                  {loading && !detail ? '—' : formatINR(detail?.price)}
+                  {loading && !detail
+                    ? '—'
+                    : formatDetailPrice(detail?.price, currencyPrefix, isUsdAsset, isPercentYield)}
                 </div>
                 {detail && (
                   <div
@@ -177,7 +201,7 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
                       <ArrowDownRight className="h-4 w-4" />
                     )}
                     <span>
-                      {formatSignedChange(detail.change, '₹')} (
+                      {formatSignedChange(detail.change, currencyPrefix)} (
                       {formatSignedPercent(detail.percentChange)})
                     </span>
                   </div>
@@ -209,6 +233,7 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
               points={detail?.points || []}
               range={range}
               previousClose={detail?.previousClose}
+              currencyPrefix={currencyPrefix}
               height={300}
               loading={loading}
             />
@@ -217,32 +242,32 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
               <div>
                 <div className="text-xs text-slate-500">Previous Close</div>
                 <div className="mt-1 text-sm font-mono tabular-nums font-semibold text-slate-900">
-                  {formatINR(detail?.previousClose)}
+                  {formatDetailPrice(detail?.previousClose, currencyPrefix, isUsdAsset, isPercentYield)}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-slate-500">Open</div>
                 <div className="mt-1 text-sm font-mono tabular-nums font-semibold text-slate-900">
-                  {formatINR(detail?.open)}
+                  {formatDetailPrice(detail?.open, currencyPrefix, isUsdAsset, isPercentYield)}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-slate-500">Day High</div>
                 <div className="mt-1 text-sm font-mono tabular-nums font-semibold text-slate-900">
-                  {formatINR(detail?.dayHigh)}
+                  {formatDetailPrice(detail?.dayHigh, currencyPrefix, isUsdAsset, isPercentYield)}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-slate-500">Day Low</div>
                 <div className="mt-1 text-sm font-mono tabular-nums font-semibold text-slate-900">
-                  {formatINR(detail?.dayLow)}
+                  {formatDetailPrice(detail?.dayLow, currencyPrefix, isUsdAsset, isPercentYield)}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-slate-500">52W Range</div>
                 <div className="mt-1 text-sm font-mono tabular-nums font-semibold text-slate-900">
                   {detail?.low52w !== null && detail?.high52w !== null
-                    ? `${formatINR(detail?.low52w, 0)} – ${formatINR(detail?.high52w, 0)}`
+                    ? `${formatDetailPrice(detail?.low52w, currencyPrefix, isUsdAsset, isPercentYield, 0)} – ${formatDetailPrice(detail?.high52w, currencyPrefix, isUsdAsset, isPercentYield, 0)}`
                     : '—'}
                 </div>
               </div>

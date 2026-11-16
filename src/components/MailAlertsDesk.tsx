@@ -126,6 +126,8 @@ export const MailAlertsDesk: React.FC<MailAlertsDeskProps> = ({ onBack }) => {
   const [savingConfig, setSavingConfig] = useState(false);
 
   const lastDispatchedQueueIdRef = useRef<string | null>(null);
+  const overviewRef = useRef<MailAlertsOverview | null>(overview);
+  overviewRef.current = overview;
 
   const handleLockDesk = () => {
     cachedUnlockToken = null;
@@ -168,7 +170,7 @@ export const MailAlertsDesk: React.FC<MailAlertsDeskProps> = ({ onBack }) => {
       if (!unlockToken) return;
       try {
         if (force) setRefreshing(true);
-        else setLoading((prev) => (overview === null ? true : prev));
+        else setLoading((prev) => (overviewRef.current === null ? true : prev));
 
         const res = await fetch(`/api/mail-alerts/overview${force ? '?force=true' : ''}`, {
           headers: { 'X-Mail-Alert-Key': unlockToken },
@@ -192,7 +194,7 @@ export const MailAlertsDesk: React.FC<MailAlertsDeskProps> = ({ onBack }) => {
         setRefreshing(false);
       }
     },
-    [overview, unlockToken]
+    [unlockToken]
   );
 
   useEffect(() => {
@@ -1068,7 +1070,7 @@ export const MailAlertsDesk: React.FC<MailAlertsDeskProps> = ({ onBack }) => {
           aria-modal="true"
           aria-labelledby="mail-confirm-title"
         >
-          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl space-y-4">
+          <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl space-y-4">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2 text-slate-900">
                 <ShieldCheck className="h-5 w-5 text-[#0D9488] shrink-0" />

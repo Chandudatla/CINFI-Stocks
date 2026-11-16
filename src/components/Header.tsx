@@ -53,20 +53,20 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="sticky top-0 z-30 border-b border-slate-800/70 bg-[#0B1D26] text-white">
-      <div className="mx-auto flex items-center justify-between gap-4 px-4 sm:px-6 py-3">
-        <div className="flex items-center gap-3 shrink-0">
+      <div className="mx-auto flex items-center justify-between gap-2 sm:gap-4 px-3 sm:px-6 py-3">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <button
             type="button"
             onClick={onOpenSidebar}
             aria-label="Open navigation menu"
-            className="lg:hidden p-1.5 -ml-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/70 cursor-pointer"
+            className="lg:hidden p-1.5 -ml-1 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/70 cursor-pointer"
           >
             <Menu className="h-5 w-5" />
           </button>
           <button
             type="button"
             onClick={onGoHome}
-            className="text-left text-base sm:text-lg font-extrabold tracking-tight text-white whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 rounded"
+            className="text-left text-sm sm:text-lg font-extrabold tracking-tight text-white whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 rounded"
           >
             CINFI Stocks
           </button>
@@ -112,7 +112,7 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </nav>
 
-        <div className="flex items-center gap-4 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-4 shrink-0">
           {marketStatus && (
             <div className="hidden xl:flex items-center gap-2 text-xs font-mono tabular-nums text-slate-300 whitespace-nowrap">
               <span
@@ -128,7 +128,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={onOpenMailAlerts}
-            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 sm:px-3 py-2 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+            className={`inline-flex items-center gap-1 sm:gap-1.5 rounded-lg border px-2 sm:px-3 py-1.5 sm:py-2 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
               mailAlertsActive
                 ? 'border-teal-400 bg-teal-950/60 text-teal-300'
                 : 'border-slate-700 bg-slate-900/50 text-slate-200 hover:border-teal-400 hover:text-white'
@@ -136,14 +136,14 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Mail className="h-3.5 w-3.5" />
             <span>Mail Alerts</span>
-            <Lock className="h-3 w-3 opacity-80" aria-hidden="true" />
+            <Lock className="hidden sm:inline h-3 w-3 opacity-80" aria-hidden="true" />
           </button>
 
           <button
             type="button"
             onClick={onSyncLive}
             disabled={isSyncing}
-            className="inline-flex items-center gap-1.5 sm:gap-2 rounded-lg bg-[#0D9488] px-3.5 sm:px-4 py-2 text-xs font-semibold text-white transition-colors duration-150 hover:bg-[#0F766E] disabled:opacity-60 whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300"
+            className="inline-flex items-center gap-1.5 sm:gap-2 rounded-lg bg-[#0D9488] px-2.5 sm:px-4 py-1.5 sm:py-2 text-xs font-semibold text-white transition-colors duration-150 hover:bg-[#0F766E] disabled:opacity-60 whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
             <span>{isSyncing ? 'Syncing' : 'Sync Live'}</span>

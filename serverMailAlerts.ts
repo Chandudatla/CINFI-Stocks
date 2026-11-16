@@ -210,6 +210,14 @@ function loadPersistedState() {
     if (Array.isArray(parsed?.deliveryLogs)) {
       deliveryLogs = parsed.deliveryLogs.slice(0, 40);
     }
+    if (parsed?.signalCooldowns && typeof parsed.signalCooldowns === 'object') {
+      const cutoff = Date.now() - COOLDOWN_MS;
+      for (const [k, ts] of Object.entries(parsed.signalCooldowns)) {
+        if (typeof ts === 'number' && ts > cutoff) {
+          signalCooldownMap.set(k, ts);
+        }
+      }
+    }
   } catch {
     // Non-fatal fallback to in-memory defaults
   }
@@ -217,11 +225,17 @@ function loadPersistedState() {
 
 function savePersistedState() {
   try {
+    const cutoff = Date.now() - COOLDOWN_MS;
+    const cooldownObj: Record<string, number> = {};
+    for (const [k, ts] of signalCooldownMap.entries()) {
+      if (ts > cutoff) cooldownObj[k] = ts;
+    }
     fs.writeFileSync(
       STATE_FILE_PATH,
       JSON.stringify({
         config: alertConfigState,
         deliveryLogs: deliveryLogs.slice(0, 40),
+        signalCooldowns: cooldownObj,
       }),
       'utf8'
     );
@@ -555,10 +569,13 @@ export async function buildMorningAllDashboardsSignals(
     deps.fetchSimpleQuote('SI=F', '1mo', '1d').catch(() => null),
     deps.fetchSimpleQuote('INR=X', '1mo', '1d').catch(() => null),
     Promise.allSettled(
-      deps.bondSymbols.slice(0, 3).map(async (b) => ({
-        ...(await deps.fetchSimpleQuote(b.symbol, '1mo', '1d')),
-        ...b,
-      }))
+      deps.bondSymbols
+        .filter((b) => !b.symbol.startsWith('^'))
+        .slice(0, 4)
+        .map(async (b) => ({
+          ...(await deps.fetchSimpleQuote(b.symbol, '1mo', '1d')),
+          ...b,
+        }))
     ),
     Promise.allSettled(
       deps.commoditySymbols.slice(0, 3).map(async (c) => ({
@@ -1100,6 +1117,12 @@ export async function dispatchResearchAlertEmail(opts: {
       if (opts.kind === 'intraday' || opts.kind === 'combined') {
         alertConfigState.lastIntradaySentAt = new Date().toISOString();
       }
+      for (const existing of deliveryLogs) {
+        if (existing.status === 'queued' && (opts.kind === 'combined' || existing.kind === opts.kind)) {
+          existing.status = 'sent';
+          existing.detail = 'Dispatched via active Gmail session';
+        }
+      }
       savePersistedState();
       const log = appendLog({
         kind: opts.kind,
@@ -1139,6 +1162,12 @@ export async function dispatchResearchAlertEmail(opts: {
     if (opts.kind === 'intraday' || opts.kind === 'combined') {
       alertConfigState.lastIntradaySentAt = new Date().toISOString();
     }
+    for (const existing of deliveryLogs) {
+      if (existing.status === 'queued' && (opts.kind === 'combined' || existing.kind === opts.kind)) {
+        existing.status = 'sent';
+        existing.detail = 'Dispatched via background SMTP';
+      }
+    }
     savePersistedState();
     const log = appendLog({
       kind: opts.kind,
@@ -1163,8 +1192,20 @@ export async function dispatchResearchAlertEmail(opts: {
 }
 
 let schedulerStarted = false;
+let schedulerTickInFlight: Promise<{ triggeredMorning: boolean; triggeredIntraday: boolean }> | null =
+  null;
 
 export async function runMailAlertSchedulerTick(deps: MailAlertsDependencies) {
+  if (schedulerTickInFlight) {
+    return schedulerTickInFlight;
+  }
+  schedulerTickInFlight = runMailAlertSchedulerTickInternal(deps).finally(() => {
+    schedulerTickInFlight = null;
+  });
+  return schedulerTickInFlight;
+}
+
+async function runMailAlertSchedulerTickInternal(deps: MailAlertsDependencies) {
   const clock = getIstClock();
   let triggeredMorning = false;
   let triggeredIntraday = false;

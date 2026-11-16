@@ -1215,10 +1215,40 @@ function parseGeminiError(err: any): { status: number; message: string } {
   return { status, message };
 }
 
+const GLOBAL_DIRECT_SYMBOLS = new Set([
+  'GLD',
+  'GDX',
+  'FNV',
+  'WPM',
+  'NEM',
+  'AEM',
+  'GOLD',
+  'SLV',
+  'PAAS',
+  'HL',
+  'AG',
+  'AAPL',
+  'MSFT',
+  'NVDA',
+  'GOOGL',
+  'AMZN',
+  'META',
+  'TSLA',
+  'SPY',
+  'QQQ',
+]);
+
 function normalizeSymbol(raw: string): string {
   const clean = raw.trim().toUpperCase();
   if (!clean) return '';
-  if (clean.startsWith('^') || clean.includes('.') || clean.includes('=')) return clean;
+  if (
+    clean.startsWith('^') ||
+    clean.includes('.') ||
+    clean.includes('=') ||
+    GLOBAL_DIRECT_SYMBOLS.has(clean)
+  ) {
+    return clean;
+  }
   return `${clean}.NS`;
 }
 
@@ -1361,12 +1391,18 @@ async function startServer() {
             .join('; ')
         : `Exchange filing streams and price-volume action tracked continuously for ${companyName}`;
 
+    const cur =
+      quote?.currency === 'USD' ||
+      (!symbol.endsWith('.NS') && !symbol.endsWith('.BO') && !symbol.startsWith('^'))
+        ? '$'
+        : '₹';
+
     const reasons = [
-      `Trend Structure: Live price ₹${price || 'N/A'} (${pct >= 0 ? '+' : ''}${pct}%) trades ${
-        sma20 ? `${price >= sma20 ? 'above' : 'below'} 20-DMA (₹${sma20})` : 'near short-term average'
-      }${sma50 ? ` and ${price >= sma50 ? 'above' : 'below'} 50-DMA (₹${sma50})` : ''}.`,
+      `Trend Structure: Live price ${cur}${price || 'N/A'} (${pct >= 0 ? '+' : ''}${pct}%) trades ${
+        sma20 ? `${price >= sma20 ? 'above' : 'below'} 20-DMA (${cur}${sma20})` : 'near short-term average'
+      }${sma50 ? ` and ${price >= sma50 ? 'above' : 'below'} 50-DMA (${cur}${sma50})` : ''}.`,
       `Momentum & Positioning: 14-day RSI sits at ${rsi ?? 'neutral'}${
-        pos52w !== null ? `, placing the stock at the ${pos52w}th percentile of its 52-week range (₹${low52w}–₹${high52w})` : ''
+        pos52w !== null ? `, placing the stock at the ${pos52w}th percentile of its 52-week range (${cur}${low52w}–${cur}${high52w})` : ''
       }.`,
       news.length > 0
         ? `Live Catalyst Wire: Latest coverage highlights ${news[0].title} (${news[0].source}).`
@@ -1383,16 +1419,16 @@ async function startServer() {
       symbol,
       companyName,
       stockAnalysis: {
-        livePriceAnalysis: `${companyName} is trading at ₹${price || 'N/A'} (${
+        livePriceAnalysis: `${companyName} is trading at ${cur}${price || 'N/A'} (${
           pct >= 0 ? '+' : ''
         }${pct}% today)${
-          pos52w !== null ? `, positioned at ${pos52w}% of its 52-week range (₹${low52w} – ₹${high52w})` : ''
-        }. Intraday spread stability reflects active institutional order flow on NSE.`,
+          pos52w !== null ? `, positioned at ${pos52w}% of its 52-week range (${cur}${low52w} – ${cur}${high52w})` : ''
+        }. Intraday spread stability reflects active institutional order flow.`,
         technicalAnalysis: `${
           sma20 && sma50
-            ? `Price is ${price >= sma20 ? 'holding above' : 'trading below'} its 20-day SMA (₹${sma20}) and ${
+            ? `Price is ${price >= sma20 ? 'holding above' : 'trading below'} its 20-day SMA (${cur}${sma20}) and ${
                 price >= sma50 ? 'above' : 'below'
-              } its 50-day SMA (₹${sma50}).`
+              } its 50-day SMA (${cur}${sma50}).`
             : 'Moving average baselines are tracking short-term price equilibrium.'
         } 14-day RSI at ${rsi ?? 'N/A'} ${
           typeof rsi === 'number'
@@ -1403,7 +1439,7 @@ async function startServer() {
                 : 'confirms balanced trend momentum'
             : ''
         }${typeof macd === 'number' && typeof macdSignal === 'number' ? ` with MACD at ${macd} vs signal ${macdSignal}.` : '.'}`,
-        fundamentalAnalysis: `Categorized under ${capTier} within ${sector}, ${companyName} competes on domestic market share, balance-sheet resilience, and India structural capex/consumption tailwinds. Official statutory financials can be audited directly via its linked Investor Relations & Annual Report filings.`,
+        fundamentalAnalysis: `Categorized under ${capTier} within ${sector}, ${companyName} competes on domestic market share, balance-sheet resilience, and structural growth tailwinds. Official statutory financials can be audited directly via its linked Investor Relations & Annual Report filings.`,
         volumeAnalysis: `${
           volRatio
             ? `Current session turnover stands at ${volRatio}x its 20-day average volume, signaling ${
@@ -1411,16 +1447,16 @@ async function startServer() {
               }.`
             : 'Exchange turnover remains consistent with 20-day liquidity averages.'
         }`,
-        financialResults: `Quarterly performance benchmarked against ${sector} peers focuses on EBITDA margin progression, return ratios (ROE/ROCE), and free cash flow conversion verified through NSE Regulation 30 & quarterly result filings.`,
+        financialResults: `Quarterly performance benchmarked against ${sector} peers focuses on EBITDA margin progression, return ratios (ROE/ROCE), and free cash flow conversion verified through official corporate result filings.`,
         newsAnalysis: `Recent live news monitor: ${headlineSummary}.`,
       },
       expertResearch: {
-        sebiAnalysts: `SEBI-registered institutional research desks evaluating ${sector} weigh earnings visibility and valuation multiples relative to 50-DMA trend support (₹${sma50 ?? 'N/A'}).`,
+        sebiAnalysts: `SEBI-registered institutional research desks evaluating ${sector} weigh earnings visibility and valuation multiples relative to 50-DMA trend support (${cur}${sma50 ?? 'N/A'}).`,
         verifiedResearch: `Quantitative factor alignment (${stance} technical score, ${
           pos52w !== null ? `${pos52w}% 52W strength` : 'active trend'
-        }) is cross-checked against live NSE filings and corporate disclosures.`,
-        opinionTracking: `Short-term market consensus tracks price behavior around the 20-day moving average (₹${sma20 ?? 'N/A'}) and volume expansion thresholds (>1.5x).`,
-        sourceVerification: `Cross-verified across live NSE/Yahoo Finance OHLCV feeds, live Google News RSS wire (${news.length} articles), and direct NSE/BSE company filing endpoints.`,
+        }) is cross-checked against live exchange filings and corporate disclosures.`,
+        opinionTracking: `Short-term market consensus tracks price behavior around the 20-day moving average (${cur}${sma20 ?? 'N/A'}) and volume expansion thresholds (>1.5x).`,
+        sourceVerification: `Cross-verified across live NSE/Yahoo Finance OHLCV feeds, live Google News RSS wire (${news.length} articles), and direct official company filing endpoints.`,
         conflictCheck: `CINFI Quantitative + Live Wire Synthesis: Zero brokerage, investment banking, or promoter conflicts of interest. Data reflects real-time exchange metrics and public filings.`,
       },
       decisionEngine: {
@@ -3081,7 +3117,8 @@ Return ONLY valid JSON matching this schema (no markdown fences):
   // Live historical chart & session details for a single equity, index, ETF, or commodity (with 1m/5m/15m support)
   app.get('/api/stock/:symbol', async (req, res) => {
     try {
-      const symbol = normalizeSymbol(req.params.symbol);
+      const rawClean = req.params.symbol.trim().toUpperCase();
+      let symbol = normalizeSymbol(rawClean);
       if (!symbol) {
         return res.status(400).json({ error: 'Invalid stock symbol' });
       }
@@ -3091,7 +3128,17 @@ Return ONLY valid JSON matching this schema (no markdown fences):
           : '1mo';
       const { range, interval } = RANGE_MAP[rangeKey];
 
-      const result = await fetchYahooChart(symbol, range, interval);
+      let result: any;
+      try {
+        result = await fetchYahooChart(symbol, range, interval);
+      } catch (primaryErr) {
+        if (symbol !== rawClean && symbol.endsWith('.NS')) {
+          result = await fetchYahooChart(rawClean, range, interval);
+          symbol = rawClean;
+        } else {
+          throw primaryErr;
+        }
+      }
       const meta = result.meta;
       const timestamps: number[] = result.timestamp || [];
       const quote = result.indicators?.quote?.[0] || {};

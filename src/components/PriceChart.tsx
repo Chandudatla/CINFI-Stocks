@@ -124,7 +124,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
           {hoverIdx !== null ? 'Point: ' : 'Latest: '}
           <span className="text-slate-900 font-semibold">
             {currencyPrefix}
-            {activePoint.close.toLocaleString('en-IN', {
+            {activePoint.close.toLocaleString(currencyPrefix === '$' ? 'en-US' : 'en-IN', {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2,
             })}
@@ -165,7 +165,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
               fontSize="11"
               fontFamily="JetBrains Mono, monospace"
             >
-              {tick.val.toLocaleString('en-IN', {
+              {tick.val.toLocaleString(currencyPrefix === '$' ? 'en-US' : 'en-IN', {
                 maximumFractionDigits: tick.val >= 1000 ? 0 : 2,
               })}
             </text>

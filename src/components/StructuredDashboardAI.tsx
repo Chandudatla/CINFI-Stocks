@@ -67,10 +67,11 @@ export const StructuredDashboardAI: React.FC<StructuredDashboardAIProps> = ({
   }, [dashboardType, focusLabel]);
 
   // Auto-Sync AI automatically when dashboard, focus target, or live sync timestamp updates
+  // Passes force=false so server 10-minute AI cache is used during 30s live price polls
   useEffect(() => {
     if (!autoSync) return;
     const controller = new AbortController();
-    runResearch(Boolean(syncedAt && data), controller.signal);
+    runResearch(false, controller.signal);
     return () => controller.abort();
   }, [dashboardType, focusLabel, syncedAt, autoSync]);
 
@@ -144,7 +145,7 @@ export const StructuredDashboardAI: React.FC<StructuredDashboardAIProps> = ({
         </div>
       )}
 
-      {loading && (
+      {loading && !data && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 animate-pulse">
           {Array.from({ length: 6 }).map((_, idx) => (
             <div key={idx} className="h-24 rounded-xl bg-slate-100" />
@@ -158,7 +159,7 @@ export const StructuredDashboardAI: React.FC<StructuredDashboardAIProps> = ({
         </div>
       )}
 
-      {data && !loading && (
+      {data && (
         <div className="space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
             <span>

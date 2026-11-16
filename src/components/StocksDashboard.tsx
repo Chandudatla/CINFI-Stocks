@@ -223,13 +223,30 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
   }, [subTab]);
 
   useEffect(() => {
-    if (stocks.length > 0 && !stocks.some((s) => s.symbol === focusSymbol)) {
+    if (stocks.length > 0 && !focusSymbol) {
       setFocusSymbol(stocks[0].symbol);
     }
   }, [stocks, focusSymbol]);
 
   const activeIndex = indices.find((i) => i.symbol === selectedIndexSymbol) || indices[0] || null;
-  const focusedStock = stocks.find((s) => s.symbol === focusSymbol) || stocks[0] || null;
+  const focusedStock =
+    stocks.find((s) => s.symbol === focusSymbol) ||
+    (focusSymbol
+      ? {
+          symbol: focusSymbol,
+          ticker: focusSymbol.replace(/\.(NS|BO)$/i, ''),
+          name: researchMap[focusSymbol]?.companyName || focusSymbol.replace(/\.(NS|BO)$/i, ''),
+          sector: 'NSE Listed',
+          capTier: 'NSE Equity',
+          price: 0,
+          change: 0,
+          percentChange: 0,
+          sma20: null,
+          sma50: null,
+          rsi14: null,
+          volumeRatio: null,
+        }
+      : stocks[0] || null);
   const activeResearch = focusedStock ? researchMap[focusedStock.symbol] || null : null;
 
   const sectors = useMemo(
@@ -316,6 +333,9 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
     payload: Parameters<typeof executeResearchRequest>[0],
     forceRefresh = false
   ) => {
+    if (!stocks.some((s) => s.symbol === payload.symbol)) {
+      onTrackSymbol(payload.symbol);
+    }
     setFocusSymbol(payload.symbol);
     setSubTab('research');
     lastAutoSyncKeyRef.current = `${payload.symbol}__${syncedAt || ''}`;
@@ -363,6 +383,7 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
   }, [requestedResearchSymbol, stocks.length]);
 
   // Auto-Sync Stocks Research AI when Module C-E is active or focused stock/live sync updates
+  // Passes forceRefresh=false so 30s live polls use the 10-minute server AI cache
   useEffect(() => {
     if (subTab !== 'research' || !autoSyncAi || !focusedStock) return;
     const syncKey = `${focusedStock.symbol}__${syncedAt || ''}`;
@@ -375,14 +396,14 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
         companyName: focusedStock.name,
         sector: focusedStock.sector,
         capTier: focusedStock.capTier,
-        price: focusedStock.price,
+        price: focusedStock.price || undefined,
         percentChange: focusedStock.percentChange,
         sma20: focusedStock.sma20,
         sma50: focusedStock.sma50,
         rsi14: focusedStock.rsi14,
         volumeRatio: focusedStock.volumeRatio,
       },
-      Boolean(researchMap[focusedStock.symbol] && syncedAt),
+      false,
       controller.signal
     );
     return () => controller.abort();
@@ -925,6 +946,9 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
               aria-label="Select company for official links"
               className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm font-semibold text-slate-900 focus:border-[#0D9488] focus:outline-none"
             >
+              {!stocks.some((s) => s.symbol === focusSymbol) && focusSymbol && (
+                <option value={focusSymbol}>{focusSymbol}</option>
+              )}
               {stocks.map((s) => (
                 <option key={s.symbol} value={s.symbol}>
                   {s.ticker} — {s.name}
@@ -1009,6 +1033,9 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
                   aria-label="Select company for AI research"
                   className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm font-semibold text-slate-900 focus:border-[#0D9488] focus:outline-none"
                 >
+                  {!stocks.some((s) => s.symbol === focusSymbol) && focusSymbol && (
+                    <option value={focusSymbol}>{focusSymbol}</option>
+                  )}
                   {stocks.map((s) => (
                     <option key={s.symbol} value={s.symbol}>
                       {s.ticker} ({s.capTier || 'NSE'})
@@ -1119,7 +1146,7 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
               </div>
             )}
 
-            {researchLoading && (
+            {researchLoading && !activeResearch && (
               <div className="space-y-4 pt-2 animate-pulse">
                 <div className="h-24 rounded-xl bg-slate-100" />
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1139,7 +1166,7 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
             )}
           </div>
 
-          {activeResearch && !researchLoading && (
+          {activeResearch && (
             <>
               {/* Module E: Decision Engine */}
               <div className="rounded-2xl border border-slate-200 bg-white p-6 space-y-5">
