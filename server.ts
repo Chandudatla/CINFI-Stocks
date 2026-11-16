@@ -1,6 +1,6 @@
 import express from 'express';
+import fs from 'fs';
 import path from 'path';
-import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import {
@@ -9,7 +9,6 @@ import {
   DASHBOARD_EARLY_NEWS_CFG,
   ETF_FUTURISTIC_SPECS,
   FNO_FUTURISTIC_SPECS,
-  FuturisticSpecBase,
   GOLD_FUTURISTIC_SPECS,
   INTRADAY_FUTURISTIC_SPECS,
   IPO_FUTURISTIC_SPECS,
@@ -17,9 +16,9 @@ import {
   SILVER_FUTURISTIC_SPECS,
   matchEarlyNewsToSpec,
   sortArticlesByNewest,
-} from './serverFuturistic';
+} from './serverFuturistic.ts';
+import type { FuturisticSpecBase } from './serverFuturistic.ts';
 import {
-  MailAlertsDependencies,
   buildIntradayBuySellSignals,
   buildMorningAllDashboardsSignals,
   dispatchResearchAlertEmail,
@@ -33,7 +32,8 @@ import {
   updateAlertConfig,
   verifyMailAlertPassword,
   verifyMailAlertUnlockToken,
-} from './serverMailAlerts';
+} from './serverMailAlerts.ts';
+import type { MailAlertsDependencies } from './serverMailAlerts.ts';
 
 dotenv.config();
 
@@ -1254,7 +1254,7 @@ function normalizeSymbol(raw: string): string {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json());
 
@@ -3629,22 +3629,51 @@ Return ONLY valid JSON matching this exact structure (no markdown code fences):
     }
   });
 
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
+  app.all('/api/*', (req, res) => {
+    return res.status(404).json({
+      error: `API endpoint not found: ${req.method} ${req.originalUrl}`,
     });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
+  });
+
+  const distPath = path.join(process.cwd(), 'dist');
+  const distIndexPath = path.join(distPath, 'index.html');
+  const hasBuiltDist = fs.existsSync(distIndexPath);
+  const isTsxDev =
+    process.env.npm_lifecycle_event === 'dev' ||
+    process.execArgv.some((arg) => arg.includes('tsx')) ||
+    process.argv.some((arg) => arg.includes('tsx'));
+  const isProduction =
+    process.env.NODE_ENV === 'production' ||
+    (!isTsxDev && hasBuiltDist) ||
+    Boolean(process.env.K_SERVICE);
+
+  let viteMounted = false;
+  if (!isProduction) {
+    try {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+      viteMounted = true;
+    } catch (viteErr) {
+      if (!hasBuiltDist) throw viteErr;
+    }
+  }
+
+  if (!viteMounted) {
     app.use(express.static(distPath));
     app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      if (!fs.existsSync(distIndexPath)) {
+        return res.status(404).send('Production bundle not found. Run npm run build.');
+      }
+      return res.sendFile(distIndexPath);
     });
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
+    console.log(`Server running on http://0.0.0.0:${PORT} (${isProduction ? 'production' : 'development'})`);
   });
 }
 

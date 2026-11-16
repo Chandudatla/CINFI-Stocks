@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { IndexQuote, MarketStatus, StockQuote } from '../types/market';
+import { fetchJson } from '../utils/safeFetch';
 
 const CUSTOM_SYMBOLS_KEY = 'cinfi_custom_symbols_v2';
 
@@ -37,11 +38,7 @@ export function useMarketData() {
         if (symbolsList.length > 0) params.set('symbols', symbolsList.join(','));
         const qs = params.toString();
         const url = qs ? `/api/market?${qs}` : '/api/market';
-        const res = await fetch(url);
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data?.error || 'Failed to sync market feed');
-        }
+        const data = await fetchJson<any>(url);
         setIndices(Array.isArray(data.indices) ? data.indices : []);
         setStocks(Array.isArray(data.stocks) ? data.stocks : []);
         setMarketStatus(data.marketStatus || null);

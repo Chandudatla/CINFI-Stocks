@@ -19,6 +19,7 @@ import {
   NewsArticle,
 } from '../types/market';
 import { formatSignedPercent } from '../utils/format';
+import { fetchJson } from '../utils/safeFetch';
 import { Sparkline } from './Sparkline';
 
 interface FuturisticTop20Props {
@@ -87,11 +88,9 @@ export const FuturisticTop20: React.FC<FuturisticTop20Props> = ({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(
+      const data = await fetchJson<FuturisticDashboardResponse>(
         `/api/dashboard/${encodeURIComponent(dashboardId)}/futuristic-20${force ? '?force=true' : ''}`
       );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || `Unable to load Best 20 for ${dashboardTitle}`);
       setPayload(data);
     } catch (err: any) {
       setError(err?.message || 'Unable to reach live exchange & early news feed');

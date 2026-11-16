@@ -28,6 +28,7 @@ import {
   SgbRecord,
   StockDetail,
 } from '../types/market';
+import { fetchJson } from '../utils/safeFetch';
 import {
   formatCompactVolume,
   formatINR,
@@ -189,11 +190,9 @@ export const SpecializedDashboards: React.FC<SpecializedDashboardsProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(
+      const data = await fetchJson<any>(
         `/api/dashboard/${dashboardId}${force ? '?force=true' : ''}`
       );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || 'Failed to load dashboard');
       setPayload(data);
       if (data.marketStatus) setMarketStatus(data.marketStatus);
       if (data.syncedAt) setSyncedAt(data.syncedAt);
@@ -222,10 +221,9 @@ export const SpecializedDashboards: React.FC<SpecializedDashboardsProps> = ({
   useEffect(() => {
     let cancelled = false;
     setChartLoading(true);
-    fetch(`/api/stock/${encodeURIComponent(chartSymbol)}?range=${chartRange}`)
-      .then((r) => r.json())
+    fetchJson<StockDetail>(`/api/stock/${encodeURIComponent(chartSymbol)}?range=${chartRange}`)
       .then((data) => {
-        if (!cancelled && !data?.error) setChartDetail(data);
+        if (!cancelled && data) setChartDetail(data);
       })
       .catch(() => {})
       .finally(() => {

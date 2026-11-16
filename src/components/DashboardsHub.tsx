@@ -14,6 +14,7 @@ import {
   Search,
 } from 'lucide-react';
 import { DashboardId, MarketStatus } from '../types/market';
+import { fetchJson } from '../utils/safeFetch';
 
 interface DashboardsHubProps {
   marketStatus: MarketStatus | null;
@@ -156,8 +157,7 @@ export const DashboardsHub: React.FC<DashboardsHubProps> = ({
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/hub-summary')
-      .then((r) => r.json())
+    fetchJson<{ metrics?: Record<string, string> }>('/api/hub-summary')
       .then((data) => {
         if (!cancelled && data?.metrics) {
           setLiveMetrics(data.metrics);

@@ -16,6 +16,7 @@ import {
   OfficialSourceLink,
 } from '../types/market';
 import { formatINR, formatSignedPercent } from '../utils/format';
+import { fetchJson } from '../utils/safeFetch';
 import { Sparkline } from './Sparkline';
 import { PriceChart } from './PriceChart';
 import { DashboardModuleGrid, MODULE_THEMES, ModuleCardSpec } from './DashboardModuleGrid';
@@ -90,9 +91,9 @@ export const MutualFundsDashboard: React.FC<MutualFundsDashboardProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/dashboard/mutual-funds${force ? '?force=true' : ''}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || 'Failed to load AMFI funds');
+      const data = await fetchJson<any>(
+        `/api/dashboard/mutual-funds${force ? '?force=true' : ''}`
+      );
       setFunds(Array.isArray(data.funds) ? data.funds : []);
       if (data.marketStatus) setMarketStatus(data.marketStatus);
       if (data.syncedAt) setSyncedAt(data.syncedAt);
@@ -113,10 +114,9 @@ export const MutualFundsDashboard: React.FC<MutualFundsDashboardProps> = ({
     if (!selectedCode) return;
     let cancelled = false;
     setDetailLoading(true);
-    fetch(`/api/mf/${encodeURIComponent(selectedCode)}`)
-      .then((r) => r.json())
+    fetchJson<MutualFundDetail>(`/api/mf/${encodeURIComponent(selectedCode)}`)
       .then((data) => {
-        if (!cancelled && !data?.error) setFundDetail(data);
+        if (!cancelled && data) setFundDetail(data);
       })
       .catch(() => {})
       .finally(() => {
@@ -137,8 +137,9 @@ export const MutualFundsDashboard: React.FC<MutualFundsDashboardProps> = ({
     const t = setTimeout(async () => {
       setSearching(true);
       try {
-        const res = await fetch(`/api/mf/search?q=${encodeURIComponent(trimmed)}`);
-        const data = await res.json();
+        const data = await fetchJson<{ results?: Array<{ schemeCode: number; schemeName: string }> }>(
+          `/api/mf/search?q=${encodeURIComponent(trimmed)}`
+        );
         if (!cancelled) {
           setSearchResults(Array.isArray(data.results) ? data.results : []);
         }

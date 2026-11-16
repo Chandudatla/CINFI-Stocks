@@ -28,6 +28,7 @@ import {
   logoutGmail,
   signInWithGmail,
 } from '../lib/firebase';
+import { fetchJson } from '../utils/safeFetch';
 import { MailAlertsOverview, TradeAlertSignal } from '../types/market';
 
 interface MailAlertsDeskProps {
@@ -146,14 +147,13 @@ export const MailAlertsDesk: React.FC<MailAlertsDeskProps> = ({ onBack }) => {
     setUnlocking(true);
     setUnlockError(null);
     try {
-      const res = await fetch('/api/mail-alerts/unlock', {
+      const data = await fetchJson<{ unlockToken?: string }>('/api/mail-alerts/unlock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: passwordInput }),
       });
-      const data = await res.json();
-      if (!res.ok || !data?.unlockToken) {
-        throw new Error(data?.error || 'Incorrect security password.');
+      if (!data?.unlockToken) {
+        throw new Error('Incorrect security password.');
       }
       cachedUnlockToken = data.unlockToken;
       setUnlockToken(data.unlockToken);
@@ -172,19 +172,20 @@ export const MailAlertsDesk: React.FC<MailAlertsDeskProps> = ({ onBack }) => {
         if (force) setRefreshing(true);
         else setLoading((prev) => (overviewRef.current === null ? true : prev));
 
-        const res = await fetch(`/api/mail-alerts/overview${force ? '?force=true' : ''}`, {
-          headers: { 'X-Mail-Alert-Key': unlockToken },
-        });
-        const data = await res.json();
-        if (res.status === 401 && data?.locked) {
+        const data = await fetchJson<MailAlertsOverview>(
+          `/api/mail-alerts/overview${force ? '?force=true' : ''}`,
+          {
+            headers: { 'X-Mail-Alert-Key': unlockToken },
+          }
+        );
+        setOverview(data);
+      } catch (err: any) {
+        if (err?.status === 401 && err?.payload?.locked) {
           cachedUnlockToken = null;
           setUnlockToken(null);
           setUnlockError('Security session expired. Re-enter password.');
           return;
         }
-        if (!res.ok) throw new Error(data?.error || 'Failed to load researched mail alerts');
-        setOverview(data);
-      } catch (err: any) {
         setStatusMessage({
           type: 'error',
           text: err?.message || 'Unable to load alert signals right now.',
@@ -274,7 +275,7 @@ export const MailAlertsDesk: React.FC<MailAlertsDeskProps> = ({ onBack }) => {
       setSendingKind(kind);
       setStatusMessage(null);
       try {
-        const res = await fetch('/api/mail-alerts/send', {
+        const data = await fetchJson<any>('/api/mail-alerts/send', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -286,21 +287,6 @@ export const MailAlertsDesk: React.FC<MailAlertsDeskProps> = ({ onBack }) => {
             triggerType,
           }),
         });
-        const data = await res.json();
-        if (res.status === 401 && data?.locked) {
-          cachedUnlockToken = null;
-          setUnlockToken(null);
-          return;
-        }
-        if (!res.ok) {
-          if (res.status === 401 || data?.needsAuth) {
-            clearGmailAccessToken();
-            setGmailToken(null);
-            setNeedsAuth(true);
-            setSessionAutoApproved(false);
-          }
-          throw new Error(data?.error || 'Failed to send alert email');
-        }
 
         setStatusMessage({
           type: 'success',
@@ -308,6 +294,17 @@ export const MailAlertsDesk: React.FC<MailAlertsDeskProps> = ({ onBack }) => {
         });
         await loadOverview(false);
       } catch (err: any) {
+        if (err?.status === 401 && err?.payload?.locked) {
+          cachedUnlockToken = null;
+          setUnlockToken(null);
+          return;
+        }
+        if (err?.status === 401 || err?.payload?.needsAuth) {
+          clearGmailAccessToken();
+          setGmailToken(null);
+          setNeedsAuth(true);
+          setSessionAutoApproved(false);
+        }
         setStatusMessage({
           type: 'error',
           text: err?.message || 'Email dispatch failed.',
@@ -324,11 +321,10 @@ export const MailAlertsDesk: React.FC<MailAlertsDeskProps> = ({ onBack }) => {
     if (!unlockToken || !sessionAutoApproved || !gmailToken) return;
     const poll = setInterval(async () => {
       try {
-        const res = await fetch('/api/mail-alerts/overview', {
+        const data = await fetchJson<MailAlertsOverview>('/api/mail-alerts/overview', {
           headers: { 'X-Mail-Alert-Key': unlockToken },
+          retries: 0,
         });
-        if (!res.ok) return;
-        const data: MailAlertsOverview = await res.json();
         setOverview(data);
 
         const latestQueued = data.deliveryLogs.find(
@@ -421,7 +417,7 @@ export const MailAlertsDesk: React.FC<MailAlertsDeskProps> = ({ onBack }) => {
     if (!unlockToken) return;
     setSavingConfig(true);
     try {
-      const res = await fetch('/api/mail-alerts/config', {
+      const data = await fetchJson<{ config: MailAlertsOverview['config'] }>('/api/mail-alerts/config', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -429,15 +425,13 @@ export const MailAlertsDesk: React.FC<MailAlertsDeskProps> = ({ onBack }) => {
         },
         body: JSON.stringify(patch),
       });
-      const data = await res.json();
-      if (res.status === 401 && data?.locked) {
+      setOverview((prev) => (prev ? { ...prev, config: data.config } : prev));
+    } catch (err: any) {
+      if (err?.status === 401 && err?.payload?.locked) {
         cachedUnlockToken = null;
         setUnlockToken(null);
         return;
       }
-      if (!res.ok) throw new Error(data?.error || 'Could not update alert config');
-      setOverview((prev) => (prev ? { ...prev, config: data.config } : prev));
-    } catch (err: any) {
       setStatusMessage({
         type: 'error',
         text: err?.message || 'Unable to save schedule configuration.',

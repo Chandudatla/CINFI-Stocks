@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Bell, ExternalLink, Newspaper, Trash2 } from 'lucide-react';
 import { DashboardId, NewsArticle, PriceAlert } from '../types/market';
+import { fetchJson } from '../utils/safeFetch';
 
 export interface MonitorMetricItem {
   symbol: string;
@@ -85,8 +86,7 @@ export const DashboardMonitoringPanel: React.FC<DashboardMonitoringPanelProps> =
     try {
       const params = new URLSearchParams({ dashboard: dashboardId });
       if (q.trim()) params.set('q', q.trim());
-      const res = await fetch(`/api/news?${params.toString()}`);
-      const data = await res.json();
+      const data = await fetchJson<{ articles?: NewsArticle[] }>(`/api/news?${params.toString()}`);
       setArticles(Array.isArray(data.articles) ? data.articles : []);
     } catch {
       setArticles([]);

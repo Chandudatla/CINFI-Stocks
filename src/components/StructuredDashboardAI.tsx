@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ExternalLink, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react';
 import { DashboardId, StructuredDashboardAiResponse } from '../types/market';
+import { fetchJson } from '../utils/safeFetch';
 
 interface StructuredDashboardAIProps {
   dashboardType: DashboardId;
@@ -33,7 +34,7 @@ export const StructuredDashboardAI: React.FC<StructuredDashboardAIProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/dashboard/ai-research', {
+      const json = await fetchJson<StructuredDashboardAiResponse>('/api/dashboard/ai-research', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal,
@@ -45,8 +46,6 @@ export const StructuredDashboardAI: React.FC<StructuredDashboardAIProps> = ({
           force: forceRefresh,
         }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || 'Unable to generate structured AI research');
       if (!signal?.aborted) {
         setData(json);
       }

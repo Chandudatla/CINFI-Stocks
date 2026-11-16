@@ -34,6 +34,7 @@ import {
   formatSignedChange,
   formatSignedPercent,
 } from '../utils/format';
+import { fetchJson } from '../utils/safeFetch';
 import { PriceChart } from './PriceChart';
 import { Sparkline } from './Sparkline';
 import { DashboardModuleGrid, MODULE_THEMES, ModuleCardSpec } from './DashboardModuleGrid';
@@ -160,10 +161,9 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
   useEffect(() => {
     let cancelled = false;
     setChartLoading(true);
-    fetch(`/api/stock/${encodeURIComponent(selectedIndexSymbol)}?range=${chartRange}`)
-      .then((r) => r.json())
+    fetchJson<StockDetail>(`/api/stock/${encodeURIComponent(selectedIndexSymbol)}?range=${chartRange}`)
       .then((data) => {
-        if (!cancelled && !data?.error) setIndexDetail(data);
+        if (!cancelled && data) setIndexDetail(data);
       })
       .catch(() => {})
       .finally(() => {
@@ -185,8 +185,9 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
     const timer = setTimeout(async () => {
       setSearchingGlobal(true);
       try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}`);
-        const data = await res.json();
+        const data = await fetchJson<{ results?: SearchHit[] }>(
+          `/api/search?q=${encodeURIComponent(trimmed)}`
+        );
         if (!cancelled) setLiveHits(Array.isArray(data.results) ? data.results : []);
       } catch {
         if (!cancelled) setLiveHits([]);
@@ -204,10 +205,9 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
   const fetchLiveNews = async (queryStr = newsQuery) => {
     setNewsLoading(true);
     try {
-      const res = await fetch(
+      const data = await fetchJson<{ articles?: NewsArticle[] }>(
         `/api/stocks/news${queryStr.trim() ? `?q=${encodeURIComponent(queryStr.trim())}` : ''}`
       );
-      const data = await res.json();
       setNewsArticles(Array.isArray(data.articles) ? data.articles : []);
     } catch {
       setNewsArticles([]);
@@ -304,7 +304,7 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
     setResearchLoading(true);
     setResearchError(null);
     try {
-      const res = await fetch('/api/stocks/research', {
+      const data = await fetchJson<StocksResearchResponse>('/api/stocks/research', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal,
@@ -314,8 +314,6 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
           force: forceRefresh,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || 'Failed to run Stocks Research AI');
       if (!signal?.aborted) {
         setResearchMap((prev) => ({ ...prev, [payload.symbol]: data }));
       }

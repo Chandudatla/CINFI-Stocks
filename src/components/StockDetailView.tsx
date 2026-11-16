@@ -13,6 +13,7 @@ import {
   formatSignedPercent,
 } from '../utils/format';
 import { PriceChart } from './PriceChart';
+import { fetchJson } from '../utils/safeFetch';
 
 function formatDetailPrice(
   value: number | null | undefined,
@@ -71,13 +72,9 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(
+        const data = await fetchJson<StockDetail>(
           `/api/stock/${encodeURIComponent(symbol)}?range=${range}`
         );
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data?.error || 'Failed to load equity data');
-        }
         if (!cancelled) {
           setDetail(data);
         }
@@ -102,7 +99,7 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
     setBriefLoading(true);
     setBriefError(null);
     try {
-      const res = await fetch('/api/ai/brief', {
+      const data = await fetchJson<AiBriefResponse>('/api/ai/brief', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal,
@@ -113,10 +110,6 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
           percentChange: targetDetail.percentChange,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error || 'Unable to generate research brief');
-      }
       if (!signal?.aborted) {
         setBrief(data);
       }
