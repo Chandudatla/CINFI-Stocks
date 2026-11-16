@@ -6,13 +6,11 @@ import { StocksDashboard } from './components/StocksDashboard';
 import { StockDetailView } from './components/StockDetailView';
 import { MutualFundsDashboard } from './components/MutualFundsDashboard';
 import { SpecializedDashboards } from './components/SpecializedDashboards';
-import { MailAlertsDesk } from './components/MailAlertsDesk';
 import { useMarketData } from './hooks/useMarketData';
 import { DashboardId } from './types/market';
 
 export function App() {
   const [activeDashboard, setActiveDashboard] = useState<DashboardId | null>(null);
-  const [showMailAlerts, setShowMailAlerts] = useState<boolean>(false);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [requestedResearchSymbol, setRequestedResearchSymbol] = useState<string | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
@@ -31,27 +29,17 @@ export function App() {
 
   const handleGoHome = () => {
     setSelectedSymbol(null);
-    setShowMailAlerts(false);
     setActiveDashboard(null);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleOpenMailAlerts = () => {
-    setSelectedSymbol(null);
-    setActiveDashboard(null);
-    setShowMailAlerts(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleOpenDashboard = (id: DashboardId) => {
     setSelectedSymbol(null);
-    setShowMailAlerts(false);
     setActiveDashboard(id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleSelectStock = (symbol: string) => {
-    setShowMailAlerts(false);
     setSelectedSymbol(symbol);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -64,10 +52,6 @@ export function App() {
           onBack={() => setSelectedSymbol(null)}
         />
       );
-    }
-
-    if (showMailAlerts) {
-      return <MailAlertsDesk onBack={handleGoHome} />;
     }
 
     if (!activeDashboard) {
@@ -116,10 +100,8 @@ export function App() {
     <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-slate-900">
       <Header
         activeDashboard={activeDashboard}
-        mailAlertsActive={showMailAlerts}
         marketStatus={marketStatus}
         onGoHome={handleGoHome}
-        onOpenMailAlerts={handleOpenMailAlerts}
         onOpenDashboard={handleOpenDashboard}
         onSyncLive={syncNow}
         onOpenSidebar={() => setMobileSidebarOpen(true)}
@@ -129,9 +111,7 @@ export function App() {
       <div className="flex flex-1">
         <Sidebar
           activeDashboard={activeDashboard}
-          mailAlertsActive={showMailAlerts}
           onSelectHome={handleGoHome}
-          onSelectMailAlerts={handleOpenMailAlerts}
           onSelectDashboard={handleOpenDashboard}
           mobileOpen={mobileSidebarOpen}
           onCloseMobile={() => setMobileSidebarOpen(false)}

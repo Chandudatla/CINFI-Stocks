@@ -143,7 +143,7 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
       const next = prev.map((al) => {
         if (al.triggeredAt) return al;
         const stk = stocks.find((s) => s.symbol === al.symbol);
-        if (!stk) return al;
+        if (!stk || typeof stk.price !== 'number' || stk.price <= 0) return al;
         const hit =
           (al.condition === 'above' && stk.price >= al.targetPrice) ||
           (al.condition === 'below' && stk.price <= al.targetPrice);
@@ -229,7 +229,7 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
   }, [stocks, focusSymbol]);
 
   const activeIndex = indices.find((i) => i.symbol === selectedIndexSymbol) || indices[0] || null;
-  const focusedStock =
+  const focusedStock: Partial<StockQuote> & { symbol: string; ticker: string; name: string; sector: string } | null =
     stocks.find((s) => s.symbol === focusSymbol) ||
     (focusSymbol
       ? {
@@ -237,10 +237,11 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
           ticker: focusSymbol.replace(/\.(NS|BO)$/i, ''),
           name: researchMap[focusSymbol]?.companyName || focusSymbol.replace(/\.(NS|BO)$/i, ''),
           sector: 'NSE Listed',
-          capTier: 'NSE Equity',
-          price: 0,
-          change: 0,
-          percentChange: 0,
+          capTier: 'Large Cap',
+          price: null,
+          previousClose: null,
+          change: null,
+          percentChange: null,
           sma20: null,
           sma50: null,
           rsi14: null,
@@ -279,7 +280,9 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
 
     if (sortBy === 'flow') {
       return [...list].sort(
-        (a, b) => (b.flowScore ?? 0) - (a.flowScore ?? 0) || Math.abs(b.percentChange) - Math.abs(a.percentChange)
+        (a, b) =>
+          (b.flowScore ?? 0) - (a.flowScore ?? 0) ||
+          Math.abs(b.percentChange ?? 0) - Math.abs(a.percentChange ?? 0)
       );
     }
     return list;
@@ -358,8 +361,8 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
         companyName: target.name,
         sector: target.sector,
         capTier: target.capTier,
-        price: target.price,
-        percentChange: target.percentChange,
+        price: target.price ?? undefined,
+        percentChange: target.percentChange ?? undefined,
         sma20: target.sma20,
         sma50: target.sma50,
         rsi14: target.rsi14,
@@ -394,8 +397,8 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
         companyName: focusedStock.name,
         sector: focusedStock.sector,
         capTier: focusedStock.capTier,
-        price: focusedStock.price || undefined,
-        percentChange: focusedStock.percentChange,
+        price: focusedStock.price ?? undefined,
+        percentChange: focusedStock.percentChange ?? undefined,
         sma20: focusedStock.sma20,
         sma50: focusedStock.sma50,
         rsi14: focusedStock.rsi14,
@@ -414,9 +417,11 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
     const targetStk = stocks.find((s) => s.symbol === alertSymbol);
     if (!targetStk) return;
 
+    const hasLivePrice = typeof targetStk.price === 'number' && targetStk.price > 0;
     const alreadyTriggered =
-      (alertCondition === 'above' && targetStk.price >= num) ||
-      (alertCondition === 'below' && targetStk.price <= num);
+      hasLivePrice &&
+      ((alertCondition === 'above' && (targetStk.price as number) >= num) ||
+        (alertCondition === 'below' && (targetStk.price as number) <= num));
 
     const newAlert: PriceAlert = {
       id: `${Date.now()}`,
@@ -432,8 +437,8 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
   };
 
   const triggeredAlerts = alerts.filter((a) => Boolean(a.triggeredAt));
-  const advancers = stocks.filter((s) => s.change > 0).length;
-  const decliners = stocks.filter((s) => s.change < 0).length;
+  const advancers = stocks.filter((s) => (s.change ?? 0) > 0).length;
+  const decliners = stocks.filter((s) => (s.change ?? 0) < 0).length;
 
   const MODULE_CARDS: Array<ModuleCardSpec<StocksTab>> = [
     {
@@ -491,7 +496,7 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
         onBack={onBack}
         modules={MODULE_CARDS}
         activeModule={subTab}
-        onSelectModule={setSubTab}
+        onSelectModule={(id) => setSubTab(id as StocksTab)}
       />
 
       {/* Live Triggered Alerts Banner */}
@@ -620,7 +625,7 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
         <PriceChart
           points={indexDetail?.points || []}
           range={chartRange}
-          previousClose={indexDetail?.previousClose}
+          previousClose={indexDetail?.previousClose ?? undefined}
           currencyPrefix=""
           height={220}
           loading={chartLoading}
@@ -851,7 +856,7 @@ export const StocksDashboard: React.FC<StocksDashboardProps> = ({
                         </tr>
                       ) : (
                         filteredStocks.map((stk) => {
-                          const pos = stk.change >= 0;
+                          const pos = (stk.change ?? 0) >= 0;
                           const flowTone =
                             stk.orderFlowType === 'buying'
                               ? 'text-emerald-700'

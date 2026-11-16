@@ -59,10 +59,10 @@ export interface StockQuote {
   sector: string;
   capTier?: CapTier;
   exchange: string;
-  price: number;
-  previousClose: number;
-  change: number;
-  percentChange: number;
+  price: number | null;
+  previousClose: number | null;
+  change: number | null;
+  percentChange: number | null;
   dayHigh: number | null;
   dayLow: number | null;
   high52w: number | null;
@@ -120,16 +120,16 @@ export interface StockDetail {
   name: string;
   exchange: string;
   currency: string;
-  price: number;
-  previousClose: number;
+  price: number | null;
+  previousClose: number | null;
   open: number | null;
   dayHigh: number | null;
   dayLow: number | null;
   high52w: number | null;
   low52w: number | null;
   volume: number | null;
-  change: number;
-  percentChange: number;
+  change: number | null;
+  percentChange: number | null;
   vwap?: number | null;
   rsi14?: number | null;
   macd?: number | null;
@@ -210,16 +210,128 @@ export interface StocksResearchResponse {
   };
   decisionEngine: {
     stance: 'Bullish' | 'Bearish' | 'Neutral';
+    recommendation?: 'Buy' | 'Hold' | 'Sell';
     riskScore: number;
     riskLabel: string;
     investmentHorizon: string;
     confidence: number;
+    shortTermOutlook?: string;
+    longTermOutlook?: string;
+    priceTrendAnalysis?: string;
+    newsSentiment?: string;
     reasons: string[];
   };
   sources: GroundingSource[];
   model: string;
   researchMode?: 'ai-grounded' | 'live-quant-news';
   generatedAt: string;
+}
+
+export interface FundamentalProfile {
+  symbol: string;
+  marketCapCr: number;
+  peRatio: number | null;
+  pbRatio: number | null;
+  epsTtm: number | null;
+  bookValuePerShare: number | null;
+  roePct: number;
+  rocePct: number;
+  revenueGrowthPct: number;
+  profitGrowthPct: number;
+  debtToEquity: number;
+  dividendYieldPct: number;
+  operatingCashFlowCr: number;
+  freeCashFlowCr: number;
+  balanceSheetSummary: string;
+  cashFlowSummary: string;
+  companyProfile: string;
+  fiiFlowNote: string;
+  diiFlowNote: string;
+  shareholding: {
+    promoter: number;
+    fii: number;
+    dii: number;
+    public: number;
+  };
+}
+
+export interface TechnicalSummary {
+  rsi14: number | null;
+  rsiZone: string;
+  macd: number | null;
+  macdSignal: number | null;
+  macdHistogram: number | null;
+  macdCrossover: string;
+  sma20: number | null;
+  sma50: number | null;
+  ema20: number | null;
+  ema50: number | null;
+  bollingerUpper: number | null;
+  bollingerMiddle: number | null;
+  bollingerLower: number | null;
+  bollingerSignal: string;
+  vwap: number | null;
+  adx14: number | null;
+  adxStrength: string;
+  pivot: number | null;
+  s1: number | null;
+  s2: number | null;
+  r1: number | null;
+  r2: number | null;
+  trendSignal: string;
+  volumeBias: string;
+  candlestickPatterns: Array<{
+    name: string;
+    bias: 'Bullish' | 'Bearish' | 'Neutral';
+    description: string;
+  }>;
+}
+
+export type InvestorChangeType =
+  | 'Newly Added'
+  | 'Increased'
+  | 'Reduced'
+  | 'Steady'
+  | 'Exited';
+
+export interface InvestorHoldingEntry {
+  ticker: string;
+  symbol: string;
+  companyName: string;
+  sector: string;
+  stakePct: string;
+  changeType: InvestorChangeType;
+  quarterLabel: string;
+  trendNote: string;
+}
+
+export interface InvestorProfile {
+  id: string;
+  name: string;
+  category: 'Famous Indian Investor' | 'Institutional Investor';
+  subType: string;
+  styleSummary: string;
+  rssQuery: string;
+  holdings: InvestorHoldingEntry[];
+}
+
+export interface StocksChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+  sources?: GroundingSource[];
+}
+
+export interface AiNewsSummaryResponse {
+  categoryLabel: string;
+  headline: string;
+  sentiment: 'Bullish' | 'Constructive' | 'Neutral' | 'Cautious' | 'Bearish';
+  summary: string;
+  keyTakeaways: string[];
+  affectedSectors: string[];
+  generatedAt: string;
+  researchMode?: 'ai-grounded' | 'live-quant-news';
 }
 
 export interface NewsArticle {
@@ -397,66 +509,5 @@ export interface BondReferenceRecord {
   durationYears: number;
   rating: string;
   interestFrequency: string;
-}
-
-export interface TradeAlertSignal {
-  id: string;
-  dashboardId: DashboardId;
-  dashboardLabel: string;
-  symbol: string;
-  name: string;
-  action: 'BUY' | 'SELL' | 'WATCH';
-  priceLabel: string;
-  changePct: number | null;
-  entryZone: string;
-  targetZone: string;
-  stopLossZone: string;
-  confidence: number;
-  timeframe: string;
-  rationale: string;
-  newsCatalyst: string;
-  newsSource?: string;
-  newsLink?: string;
-}
-
-export interface MailAlertScheduleConfig {
-  recipients: string[];
-  intraday24x7Enabled: boolean;
-  morning9AmIstEnabled: boolean;
-  morningDailyEveryDay: boolean;
-  minConfidence: number;
-  lastMorningSentDate: string | null;
-  lastIntradaySentAt: string | null;
-  nextMorningRunIst: string;
-}
-
-export interface MailAlertLogEntry {
-  id: string;
-  sentAt: string;
-  sentAtIst: string;
-  kind: 'intraday' | 'morning' | 'combined';
-  triggerType: 'manual' | 'session-auto' | 'scheduler-24x7' | 'scheduler-9am-ist';
-  transport: 'gmail' | 'smtp' | 'queued';
-  recipients: string[];
-  subject: string;
-  signalCount: number;
-  topSignals: string[];
-  status: 'sent' | 'queued' | 'failed';
-  detail?: string;
-}
-
-export interface MailAlertsOverview {
-  config: MailAlertScheduleConfig;
-  smtpConfigured: boolean;
-  istNow: {
-    dateStr: string;
-    timeStr: string;
-    weekday: string;
-    isTradingDay: boolean;
-  };
-  intradaySignals: TradeAlertSignal[];
-  morningSignals: TradeAlertSignal[];
-  deliveryLogs: MailAlertLogEntry[];
-  syncedAt: string;
 }
 

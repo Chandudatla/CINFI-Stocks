@@ -182,7 +182,7 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
                     ? '—'
                     : formatDetailPrice(detail?.price, currencyPrefix, isUsdAsset, isPercentYield)}
                 </div>
-                {detail && (
+                {detail && typeof detail.change === 'number' && (
                   <div
                     className={`mt-1 inline-flex items-center gap-1 text-sm font-semibold ${
                       isPositive ? 'text-emerald-700' : 'text-rose-600'
@@ -225,7 +225,7 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
             <PriceChart
               points={detail?.points || []}
               range={range}
-              previousClose={detail?.previousClose}
+              previousClose={detail?.previousClose ?? undefined}
               currencyPrefix={currencyPrefix}
               height={300}
               loading={loading}

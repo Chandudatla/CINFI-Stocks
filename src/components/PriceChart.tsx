@@ -9,6 +9,7 @@ interface PriceChartProps {
   currencyPrefix?: string;
   height?: number;
   loading?: boolean;
+  chartMode?: 'line' | 'candlestick';
 }
 
 export const PriceChart: React.FC<PriceChartProps> = ({
@@ -18,6 +19,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   currencyPrefix = '₹',
   height = 280,
   loading = false,
+  chartMode = 'line',
 }) => {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const gradientId = useId();
@@ -25,14 +27,22 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   const viewWidth = 760;
   const padTop = 18;
   const padBottom = 28;
-  const padLeft = 8;
+  const padLeft = 10;
   const padRight = 68;
   const plotWidth = viewWidth - padLeft - padRight;
   const plotHeight = height - padTop - padBottom;
 
   const metrics = useMemo(() => {
     if (!points || points.length === 0) return null;
-    const values = points.map((p) => p.close);
+    const values: number[] = [];
+    for (const p of points) {
+      values.push(p.close);
+      if (chartMode === 'candlestick') {
+        if (typeof p.high === 'number') values.push(p.high);
+        if (typeof p.low === 'number') values.push(p.low);
+        if (typeof p.open === 'number') values.push(p.open);
+      }
+    }
     const isIntradaySingle = range === '1d' || range === '1m' || range === '5m';
     if (typeof previousClose === 'number' && isIntradaySingle) {
       values.push(previousClose);
@@ -49,13 +59,25 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     const baseline = isIntradaySingle && typeof previousClose === 'number' ? previousClose : first;
     const isPositive = last >= baseline;
 
+    const toY = (val: number) => padTop + (1 - (val - min) / span) * plotHeight;
+
     const mapped = points.map((pt, idx) => {
       const x =
         points.length === 1
           ? padLeft + plotWidth / 2
           : padLeft + (idx / (points.length - 1)) * plotWidth;
-      const y = padTop + (1 - (pt.close - min) / span) * plotHeight;
-      return { ...pt, x, y };
+      const openVal = typeof pt.open === 'number' ? pt.open : pt.close;
+      const highVal = typeof pt.high === 'number' ? pt.high : Math.max(openVal, pt.close);
+      const lowVal = typeof pt.low === 'number' ? pt.low : Math.min(openVal, pt.close);
+      return {
+        ...pt,
+        x,
+        y: toY(pt.close),
+        openY: toY(openVal),
+        highY: toY(highVal),
+        lowY: toY(lowVal),
+        isUp: pt.close >= openVal,
+      };
     });
 
     const linePath = mapped
@@ -72,12 +94,12 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     });
 
     const prevY =
-      isIntradaySingle && typeof previousClose === 'number'
-        ? padTop + (1 - (previousClose - min) / span) * plotHeight
-        : null;
+      isIntradaySingle && typeof previousClose === 'number' ? toY(previousClose) : null;
 
-    return { mapped, linePath, areaPath, gridTicks, isPositive, prevY };
-  }, [points, previousClose, range, plotWidth, plotHeight]);
+    const candleWidth = Math.max(2.5, Math.min(12, (plotWidth / Math.max(points.length, 1)) * 0.62));
+
+    return { mapped, linePath, areaPath, gridTicks, isPositive, prevY, candleWidth };
+  }, [points, previousClose, range, plotWidth, plotHeight, chartMode]);
 
   if (loading) {
     return (
@@ -108,6 +130,14 @@ export const PriceChart: React.FC<PriceChartProps> = ({
 
   const strokeColor = metrics.isPositive ? '#059669' : '#E11D48';
 
+  const formatNum = (val: number | null | undefined) => {
+    if (typeof val !== 'number' || Number.isNaN(val)) return '—';
+    return `${currencyPrefix}${val.toLocaleString(currencyPrefix === '$' ? 'en-US' : 'en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  };
+
   const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const relX = ((e.clientX - rect.left) / rect.width) * viewWidth;
@@ -119,17 +149,26 @@ export const PriceChart: React.FC<PriceChartProps> = ({
 
   return (
     <div className="relative w-full select-none">
-      <div className="mb-2 flex items-center justify-between text-xs font-mono tabular-nums text-slate-500">
-        <span>
-          {hoverIdx !== null ? 'Point: ' : 'Latest: '}
-          <span className="text-slate-900 font-semibold">
-            {currencyPrefix}
-            {activePoint.close.toLocaleString(currencyPrefix === '$' ? 'en-US' : 'en-IN', {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs font-mono tabular-nums text-slate-500">
+        <div className="flex flex-wrap items-center gap-3">
+          <span>
+            {hoverIdx !== null ? 'Close: ' : 'Latest: '}
+            <span className="text-slate-900 font-semibold">{formatNum(activePoint.close)}</span>
           </span>
-        </span>
+          {chartMode === 'candlestick' && typeof activePoint.open === 'number' && (
+            <>
+              <span>
+                O <span className="text-slate-800">{formatNum(activePoint.open)}</span>
+              </span>
+              <span>
+                H <span className="text-emerald-700">{formatNum(activePoint.high)}</span>
+              </span>
+              <span>
+                L <span className="text-rose-600">{formatNum(activePoint.low)}</span>
+              </span>
+            </>
+          )}
+        </div>
         <span>{formatChartTimestamp(activePoint.timestamp, range)}</span>
       </div>
 
@@ -139,7 +178,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
         onMouseMove={handleMouseMove}
         onMouseLeave={() => setHoverIdx(null)}
         role="img"
-        aria-label="Live price chart"
+        aria-label={chartMode === 'candlestick' ? 'Live candlestick OHLC chart' : 'Live price chart'}
       >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
@@ -184,15 +223,47 @@ export const PriceChart: React.FC<PriceChartProps> = ({
           />
         )}
 
-        <path d={metrics.areaPath} fill={`url(#${gradientId})`} />
-        <path
-          d={metrics.linePath}
-          fill="none"
-          stroke={strokeColor}
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
+        {chartMode === 'candlestick' ? (
+          <g>
+            {metrics.mapped.map((pt, idx) => {
+              const color = pt.isUp ? '#059669' : '#E11D48';
+              const bodyTop = Math.min(pt.openY, pt.y);
+              const bodyHeight = Math.max(1.5, Math.abs(pt.y - pt.openY));
+              return (
+                <g key={idx}>
+                  <line
+                    x1={pt.x}
+                    y1={pt.highY}
+                    x2={pt.x}
+                    y2={pt.lowY}
+                    stroke={color}
+                    strokeWidth={1.25}
+                  />
+                  <rect
+                    x={pt.x - metrics.candleWidth / 2}
+                    y={bodyTop}
+                    width={metrics.candleWidth}
+                    height={bodyHeight}
+                    fill={color}
+                    rx={1}
+                  />
+                </g>
+              );
+            })}
+          </g>
+        ) : (
+          <>
+            <path d={metrics.areaPath} fill={`url(#${gradientId})`} />
+            <path
+              d={metrics.linePath}
+              fill="none"
+              stroke={strokeColor}
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </>
+        )}
 
         {hoverIdx !== null && (
           <g>
@@ -205,14 +276,16 @@ export const PriceChart: React.FC<PriceChartProps> = ({
               strokeWidth={1}
               strokeDasharray="3 3"
             />
-            <circle
-              cx={activePoint.x}
-              cy={activePoint.y}
-              r={4.5}
-              fill={strokeColor}
-              stroke="#FFFFFF"
-              strokeWidth={2}
-            />
+            {chartMode === 'line' && (
+              <circle
+                cx={activePoint.x}
+                cy={activePoint.y}
+                r={4.5}
+                fill={strokeColor}
+                stroke="#FFFFFF"
+                strokeWidth={2}
+              />
+            )}
           </g>
         )}
       </svg>

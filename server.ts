@@ -18,22 +18,6 @@ import {
   sortArticlesByNewest,
 } from './serverFuturistic.ts';
 import type { FuturisticSpecBase } from './serverFuturistic.ts';
-import {
-  buildIntradayBuySellSignals,
-  buildMorningAllDashboardsSignals,
-  dispatchResearchAlertEmail,
-  getAlertConfig,
-  getDeliveryLogs,
-  getIstClock,
-  isSmtpConfigured,
-  issueMailAlertUnlockToken,
-  runMailAlertSchedulerTick,
-  startMailAlertScheduler,
-  updateAlertConfig,
-  verifyMailAlertPassword,
-  verifyMailAlertUnlockToken,
-} from './serverMailAlerts.ts';
-import type { MailAlertsDependencies } from './serverMailAlerts.ts';
 
 dotenv.config();
 
@@ -1061,15 +1045,18 @@ function parseDdMmYyyy(dateStr: string): number {
   return new Date(yyyy, mm - 1, dd).getTime();
 }
 
-async function fetchMutualFundSummary(metaCfg: MfMetaConfig) {
+async function fetchMutualFundSummary(metaCfg: MfMetaConfig, preloadedJson?: any) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5500);
   try {
-    const res = await fetch(`https://api.mfapi.in/mf/${encodeURIComponent(metaCfg.code)}`, {
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new Error(`AMFI HTTP ${res.status}`);
-    const json = await res.json();
+    let json = preloadedJson;
+    if (!json) {
+      const res = await fetch(`https://api.mfapi.in/mf/${encodeURIComponent(metaCfg.code)}`, {
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error(`AMFI HTTP ${res.status}`);
+      json = await res.json();
+    }
     const data: Array<{ date: string; nav: string }> = json?.data || [];
     if (!json?.meta || data.length === 0) throw new Error(`No NAV for ${metaCfg.code}`);
 
@@ -1238,9 +1225,149 @@ const GLOBAL_DIRECT_SYMBOLS = new Set([
   'QQQ',
 ]);
 
+const VALID_DASHBOARD_TYPES = new Set([
+  'stocks',
+  'mutual-funds',
+  'intraday',
+  'fno',
+  'etfs',
+  'ipo',
+  'gold',
+  'silver',
+  'bonds',
+  'commodities',
+]);
+
+function isValidMarketSymbol(sym: string): boolean {
+  return /^[A-Z0-9^.=_-]{1,24}$/.test(sym);
+}
+
+function isValidMfCode(code: string): boolean {
+  return /^\d{3,10}$/.test(code);
+}
+
+function sanitizeTextInput(raw: unknown, maxLen: number): string {
+  if (typeof raw !== 'string') return '';
+  return raw
+    .replace(/[\u0000-\u001f\u007f<>`]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLen);
+}
+
+function sanitizeLiveContext(raw: unknown): Record<string, string | number | boolean> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const clean: Record<string, string | number | boolean> = {};
+  let count = 0;
+  for (const [rawKey, rawVal] of Object.entries(raw as Record<string, unknown>)) {
+    if (count >= 8) break;
+    const key = rawKey.replace(/[^a-zA-Z0-9_.-]/g, '').slice(0, 32);
+    if (!key) continue;
+    if (typeof rawVal === 'number' && Number.isFinite(rawVal)) {
+      clean[key] = rawVal;
+      count++;
+    } else if (typeof rawVal === 'boolean') {
+      clean[key] = rawVal;
+      count++;
+    } else if (typeof rawVal === 'string') {
+      const val = sanitizeTextInput(rawVal, 64);
+      if (val) {
+        clean[key] = val;
+        count++;
+      }
+    }
+  }
+  return count > 0 ? clean : undefined;
+}
+
+function redactSecrets(input: unknown): string {
+  const str = typeof input === 'string' ? input : input instanceof Error ? input.message : String(input || '');
+  return str
+    .replace(/AIza[0-9A-Za-z_-]{20,}/g, '[REDACTED_KEY]')
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [REDACTED]')
+    .replace(/(apiKey|api_key|token|secret|password|authorization)\s*[:=]\s*[^\s,;}"']+/gi, '$1=[REDACTED]');
+}
+
+function sanitizeErrorMessage(err: unknown, fallback: string): string {
+  const raw = redactSecrets(err instanceof Error ? err.message : '');
+  const lower = raw.toLowerCase();
+  if (lower.includes('abort') || lower.includes('timed out') || lower.includes('timeout')) {
+    return 'Live upstream feed timed out. Please retry in a moment.';
+  }
+  if (lower.includes('upstream http 429') || lower.includes('rate limit') || lower.includes('quota')) {
+    return 'Live feed rate limit reached. Please retry shortly.';
+  }
+  if (lower.includes('enotfound') || lower.includes('econnreset') || lower.includes('fetch failed')) {
+    return 'Unable to reach external exchange feed. Please retry.';
+  }
+  return fallback;
+}
+
+function setBoundedCache<T>(map: Map<string, T>, key: string, value: T, maxSize = 250): void {
+  if (map.has(key)) {
+    map.delete(key);
+  } else if (map.size >= maxSize) {
+    const oldestKey = map.keys().next().value;
+    if (oldestKey !== undefined) {
+      map.delete(oldestKey);
+    }
+  }
+  map.set(key, value);
+}
+
+function isAllowedPostOrigin(originHeader: string | undefined, hostHeader: string | undefined): boolean {
+  if (!originHeader) return true;
+  try {
+    const parsed = new URL(originHeader);
+    const hostname = parsed.hostname.toLowerCase();
+    const requestHost = (hostHeader || '').split(':')[0].toLowerCase();
+    if (requestHost && hostname === requestHost) return true;
+    if (hostname === 'localhost' || hostname === '127.0.0.1') return true;
+    if (
+      hostname.endsWith('.run.app') ||
+      hostname === 'aistudio.google.com' ||
+      hostname.endsWith('.aistudio.google.com') ||
+      hostname.endsWith('.google.com') ||
+      hostname.endsWith('.googleusercontent.com')
+    ) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function createRateLimiter(options: { windowMs: number; maxRequests: number }) {
+  const hits = new Map<string, { count: number; resetAt: number }>();
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const now = Date.now();
+    if (hits.size > 1500) {
+      for (const [ip, rec] of hits.entries()) {
+        if (now >= rec.resetAt) hits.delete(ip);
+      }
+    }
+    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+    const current = hits.get(clientIp);
+    if (!current || now >= current.resetAt) {
+      hits.set(clientIp, { count: 1, resetAt: now + options.windowMs });
+      return next();
+    }
+    if (current.count >= options.maxRequests) {
+      const retryAfterSec = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+      res.setHeader('Retry-After', String(retryAfterSec));
+      return res.status(429).json({
+        error: 'Rate limit exceeded. Please wait a moment before retrying.',
+      });
+    }
+    current.count += 1;
+    return next();
+  };
+}
+
 function normalizeSymbol(raw: string): string {
-  const clean = raw.trim().toUpperCase();
-  if (!clean) return '';
+  const clean = raw.trim().toUpperCase().slice(0, 24);
+  if (!clean || !isValidMarketSymbol(clean)) return '';
   if (
     clean.startsWith('^') ||
     clean.includes('.') ||
@@ -1256,7 +1383,106 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
-  app.use(express.json());
+  const distPath = path.join(process.cwd(), 'dist');
+  const distIndexPath = path.join(distPath, 'index.html');
+  const hasBuiltDist = fs.existsSync(distIndexPath);
+  const isTsxDev =
+    process.env.npm_lifecycle_event === 'dev' ||
+    process.execArgv.some((arg) => arg.includes('tsx')) ||
+    process.argv.some((arg) => arg.includes('tsx'));
+  const isProduction =
+    process.env.NODE_ENV === 'production' ||
+    (!isTsxDev && hasBuiltDist) ||
+    Boolean(process.env.K_SERVICE);
+
+  app.disable('x-powered-by');
+  app.set('trust proxy', 1);
+
+  // Block sensitive internal files, sourcemaps, and server bundles before any static/dev handler
+  const BLOCKED_EXACT_PATHS = new Set([
+    '/server.cjs',
+    '/server.cjs.map',
+    '/server.ts',
+    '/serverFuturistic.ts',
+    '/firebase-applet-config.json',
+    '/package.json',
+    '/package-lock.json',
+    '/bun.lock',
+    '/tsconfig.json',
+    '/vite.config.ts',
+  ]);
+  app.use((req, res, next) => {
+    const reqPath = (req.path || '').toLowerCase();
+    if (
+      BLOCKED_EXACT_PATHS.has(reqPath) ||
+      reqPath.endsWith('.map') ||
+      reqPath.startsWith('/.env') ||
+      reqPath.startsWith('/.git') ||
+      reqPath.startsWith('/.aistudio') ||
+      (reqPath.startsWith('/src/') && isProduction)
+    ) {
+      return res.status(404).send('Not Found');
+    }
+    return next();
+  });
+
+  // Security headers (iFrame-compatible for AI Studio preview & shared Cloud Run)
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader(
+      'Permissions-Policy',
+      'camera=(), microphone=(), geolocation=(), payment=(), usb=()'
+    );
+    res.setHeader('X-DNS-Prefetch-Control', 'off');
+    res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+    if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
+    if (isProduction && !req.path.startsWith('/api/')) {
+      res.setHeader(
+        'Content-Security-Policy',
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https:; object-src 'none'; base-uri 'self';"
+      );
+    }
+    return next();
+  });
+
+  // Origin guard on mutating API calls
+  app.use('/api', (req, res, next) => {
+    if (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE' || req.method === 'PATCH') {
+      const origin = req.headers.origin as string | undefined;
+      const host = req.headers.host;
+      if (!isAllowedPostOrigin(origin, host)) {
+        return res.status(403).json({ error: 'Forbidden request origin' });
+      }
+    }
+    return next();
+  });
+
+  const apiRateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 180 });
+  const aiRateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 30 });
+  app.use('/api', apiRateLimiter);
+  app.use(
+    [
+      '/api/stocks/research',
+      '/api/stocks/chat',
+      '/api/stocks/news-summary',
+      '/api/dashboard/ai-research',
+      '/api/ai/brief',
+    ],
+    aiRateLimiter
+  );
+
+  app.use(express.json({ limit: '64kb' }));
+  app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err && (err.type === 'entity.parse.failed' || err.type === 'entity.too.large')) {
+      return res.status(err.status || 400).json({
+        error: err.type === 'entity.too.large' ? 'Request payload too large' : 'Invalid JSON payload',
+      });
+    }
+    return next(err);
+  });
 
   const marketCache = new Map<
     string,
@@ -1461,6 +1687,8 @@ async function startServer() {
       },
       decisionEngine: {
         stance,
+        recommendation:
+          stance === 'Bullish' ? 'Buy' : stance === 'Bearish' ? 'Sell' : 'Hold',
         riskScore,
         riskLabel,
         investmentHorizon:
@@ -1470,6 +1698,21 @@ async function startServer() {
               ? 'Accumulation Watch (3–12 Months)'
               : 'Tactical Caution (Wait for Support Confirmation)',
         confidence,
+        shortTermOutlook:
+          stance === 'Bullish'
+            ? `Near-term price structure favors buying dips near ${cur}${sma20 ?? price ?? 'support'} with active momentum.`
+            : stance === 'Bearish'
+              ? `Near-term overhead supply warrants caution until price reclaims ${cur}${sma20 ?? '20-DMA'}.`
+              : `Sideways consolidation expected between ${cur}${sma20 ?? 'support'} and recent resistance.`,
+        longTermOutlook: `${companyName} remains anchored in ${sector} structural growth, balance-sheet resilience, and institutional participation.`,
+        priceTrendAnalysis:
+          sma20 && sma50 && price
+            ? `Spot (${cur}${price}) vs 20-DMA (${cur}${sma20}) and 50-DMA (${cur}${sma50}) indicates a ${stance.toLowerCase()} trajectory.`
+            : `Live exchange trajectory indicates ${stance.toLowerCase()} trend positioning.`,
+        newsSentiment:
+          news.length > 0
+            ? `${news.length} active headlines tracked; recent focus on ${news[0].source} wire updates.`
+            : 'No negative headline shock detected on live RSS wire.',
         reasons,
       },
       sources: [
@@ -1602,7 +1845,7 @@ async function startServer() {
         total: items.length,
         syncedAt: new Date().toISOString(),
       };
-      dashCache.set(cacheKey, { payload, timestamp: now });
+      setBoundedCache(dashCache, cacheKey, { payload, timestamp: now });
       return { ...payload, cached: false };
     }
 
@@ -1908,7 +2151,7 @@ async function startServer() {
       total: items.length,
       syncedAt: new Date().toISOString(),
     };
-    dashCache.set(cacheKey, { payload, timestamp: now });
+    setBoundedCache(dashCache, cacheKey, { payload, timestamp: now });
     return { ...payload, cached: false };
   }
 
@@ -1923,7 +2166,7 @@ async function startServer() {
       });
     } catch (err: any) {
       return res.status(500).json({
-        error: err?.message || 'Unable to load Futuristic 20 feed',
+        error: sanitizeErrorMessage(err, 'Unable to load Futuristic 20 feed'),
         companies: [],
         items: [],
       });
@@ -1933,6 +2176,13 @@ async function startServer() {
   // Tailored Best 20 Futuristic Picks + Reasons + Early News Updates per Dashboard (all 10 dashboards)
   app.get('/api/dashboard/:type/futuristic-20', async (req, res) => {
     const type = String(req.params.type || '').toLowerCase();
+    if (!VALID_DASHBOARD_TYPES.has(type)) {
+      return res.status(404).json({
+        error: 'Unsupported dashboard type',
+        items: [],
+        earlyNews: [],
+      });
+    }
     try {
       const force = req.query.force === 'true';
       const payload = await buildFuturisticDashboardPayload(type, force);
@@ -1941,9 +2191,8 @@ async function startServer() {
         marketStatus: getIndianMarketStatus(),
       });
     } catch (err: any) {
-      const status = err?.message?.includes('Unsupported') ? 404 : 500;
-      return res.status(status).json({
-        error: err?.message || `Unable to load Futuristic 20 for ${type}`,
+      return res.status(500).json({
+        error: sanitizeErrorMessage(err, 'Unable to load Futuristic 20 feed'),
         items: [],
         earlyNews: [],
       });
@@ -1958,7 +2207,8 @@ async function startServer() {
       const extraSymbols = extraParam
         .split(',')
         .map(normalizeSymbol)
-        .filter((s) => s.length > 0 && !s.startsWith('^'));
+        .filter((s) => s.length > 0 && !s.startsWith('^') && isValidMarketSymbol(s))
+        .slice(0, 12);
 
       const mergedSymbols = Array.from(
         new Set([...DEFAULT_UNIVERSE.map((d) => d.symbol), ...extraSymbols])
@@ -2020,7 +2270,7 @@ async function startServer() {
         syncedAt: new Date().toISOString(),
       };
 
-      marketCache.set(cacheKey, { payload, timestamp: now });
+      setBoundedCache(marketCache, cacheKey, { payload, timestamp: now });
 
       return res.json({
         ...payload,
@@ -2028,9 +2278,9 @@ async function startServer() {
         cached: false,
       });
     } catch (err: any) {
-      console.error('Error in /api/market:', err);
+      console.error('Error in /api/market:', redactSecrets(err));
       return res.status(500).json({
-        error: err?.message || 'Failed to fetch live market feed',
+        error: sanitizeErrorMessage(err, 'Failed to fetch live market feed'),
         marketStatus: getIndianMarketStatus(),
       });
     }
@@ -2039,8 +2289,8 @@ async function startServer() {
   // Shared 24/7 Live RSS News Endpoint (supports Stocks & all 9 specialized dashboards)
   const fetchRssNewsHandler = async (req: express.Request, res: express.Response) => {
     try {
-      const dash = typeof req.query.dashboard === 'string' ? req.query.dashboard : '';
-      const rawQ = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+      const dash = typeof req.query.dashboard === 'string' ? req.query.dashboard.toLowerCase() : '';
+      const rawQ = sanitizeTextInput(req.query.q, 100);
 
       const DASHBOARD_DEFAULT_QUERIES: Record<string, string> = {
         stocks: 'Indian stock market NSE BSE NIFTY SENSEX',
@@ -2082,7 +2332,7 @@ async function startServer() {
       }
     } catch (err: any) {
       return res.status(502).json({
-        error: err?.message || 'Unable to load live news stream',
+        error: sanitizeErrorMessage(err, 'Unable to load live news stream'),
         articles: [],
       });
     }
@@ -2114,7 +2364,10 @@ async function startServer() {
       }
 
       const normSym = normalizeSymbol(String(symbol));
-      const cleanQuestion = typeof customQuestion === 'string' ? customQuestion.trim() : '';
+      if (!normSym) {
+        return res.status(400).json({ error: 'Invalid stock symbol' });
+      }
+      const cleanQuestion = sanitizeTextInput(customQuestion, 240);
       const cacheKey = `stocks-research:${normSym}:${cleanQuestion}`;
       const now = Date.now();
       const cached = aiCache.get(cacheKey);
@@ -2123,9 +2376,12 @@ async function startServer() {
       }
 
       const entry = UNIVERSE_MAP.get(normSym);
-      const resolvedName = companyName || entry?.name || normSym.replace(/\.(NS|BO)$/i, '');
-      const resolvedSector = sector || entry?.sector || 'NSE Equity';
-      const resolvedCap = capTier || entry?.capTier || 'Mid Cap';
+      const safeComp = sanitizeTextInput(companyName, 80);
+      const safeSector = sanitizeTextInput(sector, 48);
+      const safeCap = sanitizeTextInput(capTier, 24);
+      const resolvedName = safeComp || entry?.name || normSym.replace(/\.(NS|BO)$/i, '');
+      const resolvedSector = safeSector || entry?.sector || 'NSE Equity';
+      const resolvedCap = safeCap || entry?.capTier || 'Mid Cap';
       const officialLinks = buildOfficialLinks(normSym.replace(/\.(NS|BO)$/i, ''), entry);
 
       // Gather live exchange quote + 3M technicals + live RSS headlines in parallel BEFORE AI call
@@ -2214,10 +2470,15 @@ Return ONLY valid JSON matching this exact schema (no markdown fences):
   },
   "decisionEngine": {
     "stance": "Bullish" | "Bearish" | "Neutral",
+    "recommendation": "Buy" | "Hold" | "Sell",
     "riskScore": <integer 1 to 10>,
     "riskLabel": "Low" | "Moderate" | "Elevated" | "High",
     "investmentHorizon": "e.g. Medium-to-Long Term (6–18 Months)",
     "confidence": <integer 55 to 95>,
+    "shortTermOutlook": "Concise 1-2 week / 1-3 month price and technical catalyst outlook",
+    "longTermOutlook": "Concise 1-3 year structural moat and earnings compounding outlook",
+    "priceTrendAnalysis": "Concise 1-sentence trend verdict referencing DMA and volume",
+    "newsSentiment": "Constructive / Neutral / Cautious headline sentiment summary",
     "reasons": [
       "Reason 1 anchored in live data/earnings",
       "Reason 2 anchored in technical/volume structure",
@@ -2247,25 +2508,229 @@ Return ONLY valid JSON matching this exact schema (no markdown fences):
           companyName: resolvedName,
           stockAnalysis: parsed.stockAnalysis || synthFallback.stockAnalysis,
           expertResearch: parsed.expertResearch || synthFallback.expertResearch,
-          decisionEngine: parsed.decisionEngine || synthFallback.decisionEngine,
+          decisionEngine: {
+            ...synthFallback.decisionEngine,
+            ...(parsed.decisionEngine || {}),
+          },
           sources,
           model: 'gemini-4-hydrogen',
           researchMode: 'ai-grounded' as const,
           generatedAt: new Date().toISOString(),
         };
-        aiCache.set(cacheKey, { payload: finalPayload, timestamp: now });
+        setBoundedCache(aiCache, cacheKey, { payload: finalPayload, timestamp: now });
         return res.json(finalPayload);
       } catch (geminiErr: any) {
         console.warn(
           'Gemini /api/stocks/research fallback triggered:',
-          parseGeminiError(geminiErr).message
+          redactSecrets(parseGeminiError(geminiErr).message)
         );
-        aiCache.set(cacheKey, { payload: synthFallback, timestamp: now });
+        setBoundedCache(aiCache, cacheKey, { payload: synthFallback, timestamp: now });
         return res.json(synthFallback);
       }
     } catch (err: any) {
-      console.error('Error in /api/stocks/research:', err);
-      return res.status(500).json({ error: err?.message || 'Stocks research unavailable' });
+      console.error('Error in /api/stocks/research:', redactSecrets(err));
+      return res.status(500).json({
+        error: sanitizeErrorMessage(err, 'Stocks research unavailable'),
+      });
+    }
+  });
+
+  // Dedicated Multi-Turn AI Stock Research Chatbot
+  app.post('/api/stocks/chat', async (req, res) => {
+    try {
+      const { symbol, companyName, message, history } = req.body || {};
+      const cleanMessage = sanitizeTextInput(message, 450);
+      if (!cleanMessage) {
+        return res.status(400).json({ error: 'Chat message is required' });
+      }
+      const normSym = symbol ? normalizeSymbol(String(symbol)) : 'RELIANCE.NS';
+      const entry = normSym ? UNIVERSE_MAP.get(normSym) : undefined;
+      const safeName = sanitizeTextInput(companyName, 80) || entry?.name || normSym || 'Indian Market';
+
+      const [liveQuote, liveNews] = await Promise.all([
+        normSym ? fetchSimpleQuote(normSym, '3mo', '1d').catch(() => null) : Promise.resolve(null),
+        fetchLiveRssArticles(`${safeName} ${normSym.replace(/\.(NS|BO)$/i, '')} stock news India`),
+      ]);
+
+      const cleanHistory = Array.isArray(history)
+        ? history
+            .slice(-6)
+            .map((h: any) => ({
+              role: h?.role === 'assistant' ? 'assistant' : 'user',
+              content: sanitizeTextInput(h?.content, 300),
+            }))
+            .filter((h) => h.content.length > 0)
+        : [];
+
+      const buildFallbackReply = () => {
+        const pricePart = liveQuote
+          ? `${safeName} (${normSym}) is trading at ₹${liveQuote.price} (${
+              liveQuote.percentChange >= 0 ? '+' : ''
+            }${liveQuote.percentChange}%) with 20-DMA ₹${liveQuote.sma20 ?? 'N/A'}, 50-DMA ₹${
+              liveQuote.sma50 ?? 'N/A'
+            }, and 14-day RSI at ${liveQuote.rsi14 ?? 'N/A'}.`
+          : `Monitoring live Indian exchange feeds for ${safeName}.`;
+        const newsPart = liveNews[0]
+          ? ` Latest wire headline: "${liveNews[0].title}" (${liveNews[0].source}).`
+          : '';
+        return `${pricePart}${newsPart} Based on quantitative trend signals, watch volume ratio (${
+          liveQuote?.volumeRatio ? `${liveQuote.volumeRatio}x 20D avg` : 'session liquidity'
+        }) around the 20-DMA pivot before sizing entries. (Informational research summary; verify statutory filings on NSE/BSE.)`;
+      };
+
+      const ai = getAiClient();
+      const sources = liveNews.slice(0, 4).map((n) => ({
+        title: `${n.title} (${n.source})`,
+        uri: n.link,
+      }));
+
+      if (!ai) {
+        return res.json({
+          reply: buildFallbackReply(),
+          sources,
+          model: 'cinfi-live-quant-news',
+          generatedAt: new Date().toISOString(),
+        });
+      }
+
+      try {
+        const contextBlock = `Focus Stock: ${safeName} (${normSym})
+Live Price: ${liveQuote ? `₹${liveQuote.price} (${liveQuote.percentChange}%)` : 'N/A'}
+Technicals: 20-DMA ₹${liveQuote?.sma20 ?? 'N/A'}, 50-DMA ₹${liveQuote?.sma50 ?? 'N/A'}, RSI(14) ${liveQuote?.rsi14 ?? 'N/A'}, VolRatio ${liveQuote?.volumeRatio ?? 'N/A'}x
+Recent Headlines:
+${liveNews.slice(0, 4).map((n, i) => `${i + 1}. ${n.title} (${n.source})`).join('\n') || 'None cached'}`;
+
+        const conversationText = cleanHistory
+          .map((m) => `${m.role === 'user' ? 'Investor' : 'Analyst'}: ${m.content}`)
+          .join('\n');
+
+        const prompt = `You are CINFI Institutional Equity Research Assistant for Indian NSE/BSE markets.
+Use Google Search when needed for latest quarterly earnings, corporate actions, or news. Answer concisely (3-5 crisp sentences or short bullets), grounded in data, with no investment guarantees.
+
+${contextBlock}
+
+${conversationText ? `Prior Conversation:\n${conversationText}\n` : ''}Investor Question: ${cleanMessage}`;
+
+        const response = await callGeminiWithRetry(ai, prompt);
+        const text = (response.text || '').trim();
+        return res.json({
+          reply: text || buildFallbackReply(),
+          sources: extractGroundingSources(response, liveNews),
+          model: 'gemini-4-hydrogen',
+          generatedAt: new Date().toISOString(),
+        });
+      } catch (err: any) {
+        console.warn('Gemini /api/stocks/chat fallback:', redactSecrets(parseGeminiError(err).message));
+        return res.json({
+          reply: buildFallbackReply(),
+          sources,
+          model: 'cinfi-live-quant-news',
+          generatedAt: new Date().toISOString(),
+        });
+      }
+    } catch (err: any) {
+      return res.status(500).json({
+        error: sanitizeErrorMessage(err, 'Research chat temporarily unavailable'),
+      });
+    }
+  });
+
+  // AI News Summaries Endpoint (Section 10 Market News)
+  app.post('/api/stocks/news-summary', async (req, res) => {
+    try {
+      const { categoryLabel, articles } = req.body || {};
+      const safeCat = sanitizeTextInput(categoryLabel, 60) || 'Latest Market News';
+      const safeArticles: Array<{ title: string; source: string }> = Array.isArray(articles)
+        ? articles
+            .slice(0, 10)
+            .map((a: any) => ({
+              title: sanitizeTextInput(a?.title, 180),
+              source: sanitizeTextInput(a?.source, 48) || 'Market Wire',
+            }))
+            .filter((a) => a.title.length > 0)
+        : [];
+
+      const cacheKey = `news-sum:${safeCat}:${safeArticles.slice(0, 3).map((a) => a.title.slice(0, 24)).join('|')}`;
+      const now = Date.now();
+      const cached = aiCache.get(cacheKey);
+      if (cached && now - cached.timestamp < AI_CACHE_TTL_MS) {
+        return res.json(cached.payload);
+      }
+
+      const fallbackSummary = {
+        categoryLabel: safeCat,
+        headline: `${safeCat} — Live Wire Digest`,
+        sentiment: 'Constructive' as const,
+        summary:
+          safeArticles.length > 0
+            ? `Tracked ${safeArticles.length} breaking headlines across ${safeCat}. Key narrative centers on: "${safeArticles[0].title}" (${safeArticles[0].source}).`
+            : `Monitoring real-time Indian exchange news, RBI macro commentary, and corporate announcements for ${safeCat}.`,
+        keyTakeaways:
+          safeArticles.length > 0
+            ? safeArticles.slice(0, 3).map((a) => `${a.title} (${a.source})`)
+            : ['Click Refresh News to stream latest NSE/BSE headlines and macro releases.'],
+        affectedSectors: ['NIFTY 50 Benchmarks', 'Banking & Financials', 'IT & Digital', 'Energy & Infra'],
+        generatedAt: new Date().toISOString(),
+        researchMode: 'live-quant-news' as const,
+      };
+
+      const ai = getAiClient();
+      if (!ai || safeArticles.length === 0) {
+        setBoundedCache(aiCache, cacheKey, { payload: fallbackSummary, timestamp: now });
+        return res.json(fallbackSummary);
+      }
+
+      try {
+        const prompt = `Summarize these live Indian financial headlines for the category "${safeCat}".
+Headlines:
+${safeArticles.map((a, i) => `${i + 1}. ${a.title} (${a.source})`).join('\n')}
+
+Return ONLY valid JSON (no markdown fences):
+{
+  "headline": "Sharp 10-word executive takeaway",
+  "sentiment": "Bullish" | "Constructive" | "Neutral" | "Cautious" | "Bearish",
+  "summary": "2 crisp sentences synthesizing market themes and sector impact.",
+  "keyTakeaways": ["Takeaway 1", "Takeaway 2", "Takeaway 3"],
+  "affectedSectors": ["Sector 1", "Sector 2", "Sector 3"]
+}`;
+
+        const response = await callGeminiWithRetry(ai, prompt);
+        const rawText = (response.text || '').trim();
+        const cleaned = rawText
+          .replace(/^```json\s*/i, '')
+          .replace(/^```\s*/i, '')
+          .replace(/```\s*$/i, '')
+          .trim();
+        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+        const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned);
+
+        const payload = {
+          categoryLabel: safeCat,
+          headline: parsed.headline || fallbackSummary.headline,
+          sentiment: parsed.sentiment || fallbackSummary.sentiment,
+          summary: parsed.summary || fallbackSummary.summary,
+          keyTakeaways:
+            Array.isArray(parsed.keyTakeaways) && parsed.keyTakeaways.length > 0
+              ? parsed.keyTakeaways.slice(0, 4)
+              : fallbackSummary.keyTakeaways,
+          affectedSectors:
+            Array.isArray(parsed.affectedSectors) && parsed.affectedSectors.length > 0
+              ? parsed.affectedSectors.slice(0, 5)
+              : fallbackSummary.affectedSectors,
+          generatedAt: new Date().toISOString(),
+          researchMode: 'ai-grounded' as const,
+        };
+        setBoundedCache(aiCache, cacheKey, { payload, timestamp: now });
+        return res.json(payload);
+      } catch (err: any) {
+        console.warn('Gemini /api/stocks/news-summary fallback:', redactSecrets(parseGeminiError(err).message));
+        setBoundedCache(aiCache, cacheKey, { payload: fallbackSummary, timestamp: now });
+        return res.json(fallbackSummary);
+      }
+    } catch (err: any) {
+      return res.status(500).json({
+        error: sanitizeErrorMessage(err, 'News summary unavailable'),
+      });
     }
   });
 
@@ -2273,8 +2738,9 @@ Return ONLY valid JSON matching this exact schema (no markdown fences):
   app.post('/api/dashboard/ai-research', async (req, res) => {
     try {
       const { dashboardType, focusLabel, liveContext, customQuestion, force } = req.body || {};
-      if (!dashboardType) {
-        return res.status(400).json({ error: 'dashboardType is required' });
+      const cleanDashType = typeof dashboardType === 'string' ? dashboardType.trim().toLowerCase() : '';
+      if (!cleanDashType || !VALID_DASHBOARD_TYPES.has(cleanDashType)) {
+        return res.status(400).json({ error: 'Valid dashboardType is required' });
       }
 
       const PILLAR_TEMPLATES: Record<
@@ -2426,10 +2892,11 @@ Return ONLY valid JSON matching this exact schema (no markdown fences):
         },
       };
 
-      const tmpl = PILLAR_TEMPLATES[dashboardType] || PILLAR_TEMPLATES['etfs'];
-      const targetSubject = focusLabel || dashboardType;
-      const cleanQuestion = typeof customQuestion === 'string' ? customQuestion.trim() : '';
-      const cacheKey = `dash-ai:${dashboardType}:${targetSubject}:${cleanQuestion}`;
+      const tmpl = PILLAR_TEMPLATES[cleanDashType] || PILLAR_TEMPLATES['etfs'];
+      const targetSubject = sanitizeTextInput(focusLabel, 120) || cleanDashType;
+      const cleanQuestion = sanitizeTextInput(customQuestion, 240);
+      const safeContext = sanitizeLiveContext(liveContext);
+      const cacheKey = `dash-ai:${cleanDashType}:${targetSubject}:${cleanQuestion}`;
       const now = Date.now();
       const cached = aiCache.get(cacheKey);
       if (!force && cached && now - cached.timestamp < AI_CACHE_TTL_MS) {
@@ -2437,14 +2904,14 @@ Return ONLY valid JSON matching this exact schema (no markdown fences):
       }
 
       let liveNews = await fetchLiveRssArticles(tmpl.newsQuery);
-      if (targetSubject && targetSubject.toLowerCase() !== dashboardType.toLowerCase()) {
+      if (targetSubject && targetSubject.toLowerCase() !== cleanDashType) {
         const focusedNews = await fetchLiveRssArticles(`${targetSubject} India market`);
         if (focusedNews.length > 0) {
           liveNews = [...focusedNews, ...liveNews].slice(0, 6);
         }
       }
 
-      const ctx = (liveContext && typeof liveContext === 'object' ? liveContext : {}) as Record<string, any>;
+      const ctx = safeContext || {};
       const pctNum = typeof ctx.percentChange === 'number' ? ctx.percentChange : null;
       const r1y = typeof ctx.return1y === 'number' ? ctx.return1y : null;
       const stanceFallback: 'Bullish' | 'Constructive' | 'Neutral' | 'Cautious' | 'Bearish' =
@@ -2522,7 +2989,7 @@ Return ONLY valid JSON matching this exact schema (no markdown fences):
 
         const prompt = `You are a ${tmpl.role} in India.
 Target / Focus: ${targetSubject}
-${cleanQuestion ? `User Priority Question: "${cleanQuestion}"\n` : ''}Live Market Snapshot: ${liveContext ? JSON.stringify(liveContext) : 'Live NSE/AMFI/COMEX feed active'}
+${cleanQuestion ? `User Priority Question: "${cleanQuestion}"\n` : ''}Live Market Snapshot: ${safeContext ? JSON.stringify(safeContext) : 'Live NSE/AMFI/COMEX feed active'}
 
 Recent Market Headlines:
 ${headlineContext}
@@ -2565,7 +3032,7 @@ Return ONLY valid JSON matching this schema (no markdown fences):
         const sources = extractGroundingSources(response, liveNews);
 
         const finalPayload = {
-          dashboardType,
+          dashboardType: cleanDashType,
           focusLabel: targetSubject,
           stance: parsed.stance || synthPayload.stance,
           riskScore: Number(parsed.riskScore) || synthPayload.riskScore,
@@ -2588,19 +3055,21 @@ Return ONLY valid JSON matching this schema (no markdown fences):
           researchMode: 'ai-grounded' as const,
           generatedAt: new Date().toISOString(),
         };
-        aiCache.set(cacheKey, { payload: finalPayload, timestamp: now });
+        setBoundedCache(aiCache, cacheKey, { payload: finalPayload, timestamp: now });
         return res.json(finalPayload);
       } catch (geminiErr: any) {
         console.warn(
           'Gemini /api/dashboard/ai-research fallback triggered:',
-          parseGeminiError(geminiErr).message
+          redactSecrets(parseGeminiError(geminiErr).message)
         );
-        aiCache.set(cacheKey, { payload: synthPayload, timestamp: now });
+        setBoundedCache(aiCache, cacheKey, { payload: synthPayload, timestamp: now });
         return res.json(synthPayload);
       }
     } catch (err: any) {
-      console.error('Error in /api/dashboard/ai-research:', err);
-      return res.status(500).json({ error: err?.message || 'Dashboard research unavailable' });
+      console.error('Error in /api/dashboard/ai-research:', redactSecrets(err));
+      return res.status(500).json({
+        error: sanitizeErrorMessage(err, 'Dashboard research unavailable'),
+      });
     }
   });
 
@@ -2694,16 +3163,21 @@ Return ONLY valid JSON matching this schema (no markdown fences):
         pulse,
         syncedAt: new Date().toISOString(),
       };
-      dashCache.set('hub-summary', { payload, timestamp: now });
+      setBoundedCache(dashCache, 'hub-summary', { payload, timestamp: now });
       return res.json({ ...payload, marketStatus: getIndianMarketStatus() });
     } catch (err: any) {
-      return res.status(500).json({ error: err?.message || 'Hub summary unavailable' });
+      return res.status(500).json({
+        error: sanitizeErrorMessage(err, 'Hub summary unavailable'),
+      });
     }
   });
 
   // Independent Live Dashboard Feeds for 02..10
   app.get('/api/dashboard/:type', async (req, res) => {
-    const type = req.params.type;
+    const type = String(req.params.type || '').toLowerCase();
+    if (!VALID_DASHBOARD_TYPES.has(type) || type === 'stocks') {
+      return res.status(404).json({ error: 'Unknown dashboard type' });
+    }
     const force = req.query.force === 'true';
     const now = Date.now();
     const cached = dashCache.get(`dash:${type}`);
@@ -3020,12 +3494,12 @@ Return ONLY valid JSON matching this schema (no markdown fences):
         return res.status(404).json({ error: `Unknown dashboard type: ${type}` });
       }
 
-      dashCache.set(`dash:${type}`, { payload, timestamp: now });
+      setBoundedCache(dashCache, `dash:${type}`, { payload, timestamp: now });
       return res.json({ ...payload, marketStatus: getIndianMarketStatus(), cached: false });
     } catch (err: any) {
-      console.error(`Error in /api/dashboard/${type}:`, err);
+      console.error(`Error in /api/dashboard/${type}:`, redactSecrets(err));
       return res.status(502).json({
-        error: err?.message || `Unable to load live data for ${type}`,
+        error: sanitizeErrorMessage(err, 'Unable to load live dashboard data'),
       });
     }
   });
@@ -3033,7 +3507,7 @@ Return ONLY valid JSON matching this schema (no markdown fences):
   // Live AMFI Mutual Fund Search
   app.get('/api/mf/search', async (req, res) => {
     try {
-      const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+      const q = sanitizeTextInput(req.query.q, 80);
       if (q.length < 2) return res.json({ results: [] });
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5000);
@@ -3055,14 +3529,20 @@ Return ONLY valid JSON matching this schema (no markdown fences):
         clearTimeout(timeout);
       }
     } catch (err: any) {
-      return res.status(502).json({ error: err?.message || 'MF search failed', results: [] });
+      return res.status(502).json({
+        error: sanitizeErrorMessage(err, 'Mutual fund search unavailable'),
+        results: [],
+      });
     }
   });
 
   // Live AMFI Mutual Fund Full Historical NAV
   app.get('/api/mf/:code', async (req, res) => {
     try {
-      const code = req.params.code;
+      const code = String(req.params.code || '').trim();
+      if (!isValidMfCode(code)) {
+        return res.status(400).json({ error: 'Invalid mutual fund scheme code' });
+      }
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 6000);
       try {
@@ -3099,7 +3579,7 @@ Return ONLY valid JSON matching this schema (no markdown fences):
           amcUrl: 'https://www.amfiindia.com/',
           factsheetUrl: 'https://www.amfiindia.com/research-information/other-data/mf-scheme-performance-details',
         };
-        const summary = await fetchMutualFundSummary(matchedMeta);
+        const summary = await fetchMutualFundSummary(matchedMeta, json);
         return res.json({
           ...summary,
           schemeType: json.meta.scheme_type,
@@ -3110,14 +3590,19 @@ Return ONLY valid JSON matching this schema (no markdown fences):
         clearTimeout(timeout);
       }
     } catch (err: any) {
-      return res.status(502).json({ error: err?.message || 'Unable to load mutual fund NAV' });
+      return res.status(502).json({
+        error: sanitizeErrorMessage(err, 'Unable to load mutual fund NAV'),
+      });
     }
   });
 
   // Live historical chart & session details for a single equity, index, ETF, or commodity (with 1m/5m/15m support)
   app.get('/api/stock/:symbol', async (req, res) => {
     try {
-      const rawClean = req.params.symbol.trim().toUpperCase();
+      const rawClean = req.params.symbol.trim().toUpperCase().slice(0, 24);
+      if (!isValidMarketSymbol(rawClean)) {
+        return res.status(400).json({ error: 'Invalid stock symbol' });
+      }
       let symbol = normalizeSymbol(rawClean);
       if (!symbol) {
         return res.status(400).json({ error: 'Invalid stock symbol' });
@@ -3238,9 +3723,9 @@ Return ONLY valid JSON matching this schema (no markdown fences):
         updatedAt: new Date().toISOString(),
       });
     } catch (err: any) {
-      console.error(`Error in /api/stock/${req.params.symbol}:`, err);
+      console.error('Error in /api/stock:', redactSecrets(err));
       return res.status(502).json({
-        error: err?.message || 'Unable to load live stock chart',
+        error: sanitizeErrorMessage(err, 'Unable to load live stock chart'),
       });
     }
   });
@@ -3248,7 +3733,7 @@ Return ONLY valid JSON matching this schema (no markdown fences):
   // Live NSE/BSE company search
   app.get('/api/search', async (req, res) => {
     try {
-      const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+      const q = sanitizeTextInput(req.query.q, 80);
       if (q.length < 2) {
         return res.json({ results: [] });
       }
@@ -3289,8 +3774,11 @@ Return ONLY valid JSON matching this schema (no markdown fences):
         clearTimeout(timeout);
       }
     } catch (err: any) {
-      console.error('Error in /api/search:', err);
-      return res.status(502).json({ error: err?.message || 'Search unavailable', results: [] });
+      console.error('Error in /api/search:', redactSecrets(err));
+      return res.status(502).json({
+        error: sanitizeErrorMessage(err, 'Search unavailable'),
+        results: [],
+      });
     }
   });
 
@@ -3299,21 +3787,28 @@ Return ONLY valid JSON matching this schema (no markdown fences):
     try {
       const { symbol, companyName, price, percentChange, topic, dashboardType, force } =
         req.body || {};
-      const cacheKey = `ai-brief:${symbol || topic || dashboardType || 'market'}`;
+      const safeSymbol = symbol ? normalizeSymbol(String(symbol)) : '';
+      const safeCompany = sanitizeTextInput(companyName, 80);
+      const safeTopic = sanitizeTextInput(topic, 140);
+      const safeDash =
+        typeof dashboardType === 'string' && VALID_DASHBOARD_TYPES.has(dashboardType.toLowerCase())
+          ? dashboardType.toLowerCase()
+          : '';
+      const cacheKey = `ai-brief:${safeSymbol || safeTopic || safeDash || 'market'}`;
       const now = Date.now();
       const cached = aiCache.get(cacheKey);
       if (!force && cached && now - cached.timestamp < AI_CACHE_TTL_MS) {
         return res.json(cached.payload);
       }
 
-      const normSym = symbol ? normalizeSymbol(String(symbol)) : '';
+      const normSym = safeSymbol;
       const [liveQuote, liveNews] = await Promise.all([
         normSym ? fetchSimpleQuote(normSym, '3mo', '1d').catch(() => null) : Promise.resolve(null),
         fetchLiveRssArticles(
-          symbol
-            ? `${companyName || normSym.replace(/\.(NS|BO)$/i, '')} stock news India`
-            : topic
-              ? `${String(topic)} India finance`
+          normSym
+            ? `${safeCompany || normSym.replace(/\.(NS|BO)$/i, '')} stock news India`
+            : safeTopic
+              ? `${safeTopic} India finance`
               : 'Indian stock market NIFTY SENSEX news'
         ),
       ]);
@@ -3334,13 +3829,13 @@ Return ONLY valid JSON matching this schema (no markdown fences):
           : 'Constructive';
 
       const synthBrief = {
-        headline: symbol
-          ? `${companyName || symbol} Live Exchange & Wire Research Brief`
-          : `${topic || 'Indian Equity Market'} Intelligence Brief`,
+        headline: safeSymbol
+          ? `${safeCompany || safeSymbol} Live Exchange & Wire Research Brief`
+          : `${safeTopic || 'Indian Equity Market'} Intelligence Brief`,
         sentiment: sentimentFallback,
         summary: `${
-          symbol
-            ? `${companyName || symbol} trades at ₹${resolvedPrice ?? 'N/A'} (${
+          safeSymbol
+            ? `${safeCompany || safeSymbol} trades at ₹${resolvedPrice ?? 'N/A'} (${
                 typeof resolvedPct === 'number'
                   ? `${resolvedPct >= 0 ? '+' : ''}${resolvedPct}%`
                   : 'N/A'
@@ -3389,7 +3884,7 @@ Return ONLY valid JSON matching this schema (no markdown fences):
 
       const ai = getAiClient();
       if (!ai) {
-        aiCache.set(cacheKey, { payload: synthBrief, timestamp: now });
+        setBoundedCache(aiCache, cacheKey, { payload: synthBrief, timestamp: now });
         return res.json(synthBrief);
       }
 
@@ -3410,16 +3905,16 @@ Return ONLY valid JSON matching this schema (no markdown fences):
           'Global & Indian MCX Commodities outlook today: Brent crude impact on India, Natural Gas, Copper, industrial metals.',
       };
 
-      const researchTarget = symbol
-        ? `Indian NSE/BSE equity ${companyName || symbol} (${symbol})${
+      const researchTarget = safeSymbol
+        ? `Indian NSE/BSE equity ${safeCompany || safeSymbol} (${safeSymbol})${
             typeof resolvedPrice === 'number' ? `, current live price ₹${resolvedPrice}` : ''
           }${typeof resolvedPct === 'number' ? ` (${resolvedPct >= 0 ? '+' : ''}${resolvedPct}%)` : ''}${
             liveQuote?.sma20 ? `, 20-DMA ₹${liveQuote.sma20}, RSI(14) ${liveQuote.rsi14 ?? 'N/A'}` : ''
           }`
-        : topic
-          ? `Indian financial market topic: "${String(topic).slice(0, 160)}"`
-          : dashboardType && DASHBOARD_PROMPTS[dashboardType]
-            ? DASHBOARD_PROMPTS[dashboardType]
+        : safeTopic
+          ? `Indian financial market topic: "${safeTopic}"`
+          : safeDash && DASHBOARD_PROMPTS[safeDash]
+            ? DASHBOARD_PROMPTS[safeDash]
             : 'Indian stock market today (NIFTY 50, SENSEX, RBI macro backdrop, sector flows)';
 
       try {
@@ -3471,181 +3966,29 @@ Return ONLY valid JSON matching this exact structure (no markdown code fences):
           researchMode: 'ai-grounded' as const,
           generatedAt: new Date().toISOString(),
         };
-        aiCache.set(cacheKey, { payload: finalPayload, timestamp: now });
+        setBoundedCache(aiCache, cacheKey, { payload: finalPayload, timestamp: now });
         return res.json(finalPayload);
       } catch (geminiErr: any) {
         console.warn(
           'Gemini /api/ai/brief fallback triggered:',
-          parseGeminiError(geminiErr).message
+          redactSecrets(parseGeminiError(geminiErr).message)
         );
-        aiCache.set(cacheKey, { payload: synthBrief, timestamp: now });
+        setBoundedCache(aiCache, cacheKey, { payload: synthBrief, timestamp: now });
         return res.json(synthBrief);
       }
     } catch (err: any) {
-      console.error('Error in /api/ai/brief:', err);
-      return res.status(500).json({ error: err?.message || 'Research brief unavailable' });
-    }
-  });
-
-  const mailAlertsDeps: MailAlertsDependencies = {
-    defaultUniverse: DEFAULT_UNIVERSE,
-    intradayWatch: INTRADAY_WATCH,
-    mfSchemes: MF_SCHEMES,
-    etfList: ETF_LIST,
-    ipoListedMeta: IPO_LISTED_META,
-    ipoPipelineMeta: IPO_PIPELINE_META,
-    bondSymbols: BOND_SYMBOLS,
-    commoditySymbols: COMMODITY_SYMBOLS,
-    fetchSimpleQuote,
-    fetchMutualFundSummary,
-    fetchLiveRssArticles,
-  };
-
-  startMailAlertScheduler(mailAlertsDeps);
-
-  app.post('/api/mail-alerts/unlock', (req, res) => {
-    const password = typeof req.body?.password === 'string' ? req.body.password : '';
-    if (!verifyMailAlertPassword(password)) {
-      return res.status(403).json({
-        error: 'Incorrect Mail Alert security password.',
-        locked: true,
-      });
-    }
-    const session = issueMailAlertUnlockToken();
-    return res.json({
-      ok: true,
-      unlockToken: session.token,
-      expiresAt: session.expiresAt,
-    });
-  });
-
-  const requireMailAlertUnlock: express.RequestHandler = (req, res, next) => {
-    const unlockHeader = req.headers['x-mail-alert-key'];
-    const token = Array.isArray(unlockHeader) ? unlockHeader[0] : unlockHeader;
-    if (!verifyMailAlertUnlockToken(token)) {
-      return res.status(401).json({
-        error: 'Mail Alert desk is locked. Enter the security password to unlock.',
-        locked: true,
-      });
-    }
-    return next();
-  };
-
-  app.get('/api/mail-alerts/overview', requireMailAlertUnlock, async (req, res) => {
-    try {
-      const force = req.query.force === 'true';
-      const now = Date.now();
-      const cached = dashCache.get('mail-alerts-overview');
-      if (!force && cached && now - cached.timestamp < CACHE_TTL_MS) {
-        const clock = getIstClock();
-        return res.json({
-          ...cached.payload,
-          config: getAlertConfig(),
-          smtpConfigured: isSmtpConfigured(),
-          istNow: {
-            dateStr: clock.dateStr,
-            timeStr: clock.timeStr,
-            weekday: clock.weekday,
-            isTradingDay: clock.isTradingDay,
-          },
-          deliveryLogs: getDeliveryLogs(),
-        });
-      }
-
-      await runMailAlertSchedulerTick(mailAlertsDeps).catch(() => null);
-      const [intradaySignals, morningSignals] = await Promise.all([
-        buildIntradayBuySellSignals(mailAlertsDeps),
-        buildMorningAllDashboardsSignals(mailAlertsDeps),
-      ]);
-      const clock = getIstClock();
-      const payload = {
-        config: getAlertConfig(),
-        smtpConfigured: isSmtpConfigured(),
-        istNow: {
-          dateStr: clock.dateStr,
-          timeStr: clock.timeStr,
-          weekday: clock.weekday,
-          isTradingDay: clock.isTradingDay,
-        },
-        intradaySignals,
-        morningSignals,
-        deliveryLogs: getDeliveryLogs(),
-        syncedAt: new Date().toISOString(),
-      };
-      dashCache.set('mail-alerts-overview', { payload, timestamp: now });
-      return res.json(payload);
-    } catch (err: any) {
-      console.error('Error in /api/mail-alerts/overview:', err);
-      return res.status(502).json({ error: err?.message || 'Unable to compute alert overview' });
-    }
-  });
-
-  app.post('/api/mail-alerts/config', requireMailAlertUnlock, (req, res) => {
-    try {
-      const updated = updateAlertConfig(req.body || {});
-      return res.json({ ok: true, config: updated });
-    } catch (err: any) {
-      return res.status(400).json({ error: err?.message || 'Invalid alert settings' });
-    }
-  });
-
-  app.post('/api/mail-alerts/send', requireMailAlertUnlock, async (req, res) => {
-    try {
-      const authHeader = req.headers.authorization || '';
-      const bearerToken = authHeader.startsWith('Bearer ')
-        ? authHeader.slice(7).trim()
-        : null;
-      const body = req.body || {};
-      const kind: 'intraday' | 'morning' | 'combined' =
-        body.kind === 'morning' || body.kind === 'combined' ? body.kind : 'intraday';
-      const triggerType =
-        body.triggerType === 'session-auto' ? 'session-auto' : 'manual';
-      const transport =
-        body.transport === 'gmail' || body.transport === 'smtp' ? body.transport : 'auto';
-
-      const result = await dispatchResearchAlertEmail({
-        kind,
-        triggerType,
-        accessToken: bearerToken,
-        transport,
-        deps: mailAlertsDeps,
-      });
-      return res.json(result);
-    } catch (err: any) {
-      const statusCode = err?.needsAuth ? 401 : err?.status || 400;
-      return res.status(statusCode).json({
-        error: err?.message || 'Failed to send alert mail',
-        needsAuth: Boolean(err?.needsAuth),
+      console.error('Error in /api/ai/brief:', redactSecrets(err));
+      return res.status(500).json({
+        error: sanitizeErrorMessage(err, 'Research brief unavailable'),
       });
     }
   });
 
-  app.post('/api/mail-alerts/cron-tick', requireMailAlertUnlock, async (_req, res) => {
-    try {
-      const result = await runMailAlertSchedulerTick(mailAlertsDeps);
-      return res.json({ ok: true, ...result, deliveryLogs: getDeliveryLogs() });
-    } catch (err: any) {
-      return res.status(500).json({ error: err?.message || 'Cron evaluation failed' });
-    }
-  });
-
-  app.all('/api/*', (req, res) => {
+  app.all('/api/*', (_req, res) => {
     return res.status(404).json({
-      error: `API endpoint not found: ${req.method} ${req.originalUrl}`,
+      error: 'API endpoint not found',
     });
   });
-
-  const distPath = path.join(process.cwd(), 'dist');
-  const distIndexPath = path.join(distPath, 'index.html');
-  const hasBuiltDist = fs.existsSync(distIndexPath);
-  const isTsxDev =
-    process.env.npm_lifecycle_event === 'dev' ||
-    process.execArgv.some((arg) => arg.includes('tsx')) ||
-    process.argv.some((arg) => arg.includes('tsx'));
-  const isProduction =
-    process.env.NODE_ENV === 'production' ||
-    (!isTsxDev && hasBuiltDist) ||
-    Boolean(process.env.K_SERVICE);
 
   let viteMounted = false;
   if (!isProduction) {
@@ -3678,6 +4021,6 @@ Return ONLY valid JSON matching this exact structure (no markdown code fences):
 }
 
 startServer().catch((err) => {
-  console.error('Failed to start server:', err);
+  console.error('Failed to start server:', redactSecrets(err));
   process.exit(1);
 });

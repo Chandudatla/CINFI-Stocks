@@ -1,13 +1,11 @@
 import React from 'react';
-import { Lock, Mail, Menu, RefreshCw } from 'lucide-react';
+import { Menu, RefreshCw } from 'lucide-react';
 import { DashboardId, MarketStatus } from '../types/market';
 
 interface HeaderProps {
   activeDashboard: DashboardId | null;
-  mailAlertsActive?: boolean;
   marketStatus?: MarketStatus | null;
   onGoHome: () => void;
-  onOpenMailAlerts: () => void;
   onOpenDashboard: (id: DashboardId) => void;
   onSyncLive: () => void;
   onOpenSidebar: () => void;
@@ -37,17 +35,14 @@ const DASHBOARD_LABELS: Record<DashboardId, string> = {
 
 export const Header: React.FC<HeaderProps> = ({
   activeDashboard,
-  mailAlertsActive = false,
   marketStatus,
   onGoHome,
-  onOpenMailAlerts,
   onOpenDashboard,
   onSyncLive,
   onOpenSidebar,
   isSyncing,
 }) => {
   const isSecondaryActive =
-    !mailAlertsActive &&
     activeDashboard !== null &&
     !TOP_NAV_LINKS.some((link) => link.id === activeDashboard);
 
@@ -78,7 +73,7 @@ export const Header: React.FC<HeaderProps> = ({
             type="button"
             onClick={onGoHome}
             className={`relative py-1 font-medium transition-colors duration-150 whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none ${
-              activeDashboard === null && !mailAlertsActive
+              activeDashboard === null
                 ? 'text-teal-300 font-semibold'
                 : 'text-slate-300 hover:text-white'
             }`}
@@ -124,20 +119,6 @@ export const Header: React.FC<HeaderProps> = ({
               <span>{marketStatus.statusLabel}</span>
             </div>
           )}
-
-          <button
-            type="button"
-            onClick={onOpenMailAlerts}
-            className={`inline-flex items-center gap-1 sm:gap-1.5 rounded-lg border px-2 sm:px-3 py-1.5 sm:py-2 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              mailAlertsActive
-                ? 'border-teal-400 bg-teal-950/60 text-teal-300'
-                : 'border-slate-700 bg-slate-900/50 text-slate-200 hover:border-teal-400 hover:text-white'
-            }`}
-          >
-            <Mail className="h-3.5 w-3.5" />
-            <span>Mail Alerts</span>
-            <Lock className="hidden sm:inline h-3 w-3 opacity-80" aria-hidden="true" />
-          </button>
 
           <button
             type="button"

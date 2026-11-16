@@ -225,7 +225,9 @@ export const DashboardMonitoringPanel: React.FC<DashboardMonitoringPanelProps> =
               </button>
             </form>
           ) : (
-            <p className="text-xs text-slate-500">Loading instruments for alerts...</p>
+            <p className="text-xs text-slate-500">
+              Live price threshold alerts activate automatically when real-time tick quotes are available.
+            </p>
           )}
 
           {alerts.length > 0 && (

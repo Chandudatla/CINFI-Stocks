@@ -11,17 +11,13 @@ import {
   Gem,
   Landmark,
   Box,
-  Lock,
-  Mail,
   X,
 } from 'lucide-react';
 import { DashboardId } from '../types/market';
 
 interface SidebarProps {
   activeDashboard: DashboardId | null;
-  mailAlertsActive?: boolean;
   onSelectHome: () => void;
-  onSelectMailAlerts: () => void;
   onSelectDashboard: (id: DashboardId) => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
@@ -47,9 +43,7 @@ const SIDEBAR_ITEMS: Array<{
 
 export const Sidebar: React.FC<SidebarProps> = ({
   activeDashboard,
-  mailAlertsActive = false,
   onSelectHome,
-  onSelectMailAlerts,
   onSelectDashboard,
   mobileOpen,
   onCloseMobile,
@@ -68,35 +62,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onCloseMobile();
             }}
             className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-              activeDashboard === null && !mailAlertsActive
+              activeDashboard === null
                 ? 'bg-[#F0FDFA] text-[#0D9488]'
                 : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'
             }`}
           >
             <Home className="h-4 w-4 shrink-0" />
             <span>CINFI Home</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              onSelectMailAlerts();
-              onCloseMobile();
-            }}
-            className={`w-full flex items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-              mailAlertsActive
-                ? 'bg-[#F0FDFA] text-[#0D9488]'
-                : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'
-            }`}
-          >
-            <span className="flex items-center gap-3 min-w-0">
-              <Mail className="h-4 w-4 shrink-0" />
-              <span className="truncate">Mail Alerts</span>
-            </span>
-            <span className="inline-flex items-center gap-1 font-mono tabular-nums text-[11px] text-slate-400 shrink-0">
-              <Lock className="h-3 w-3" aria-hidden="true" />
-              24/7
-            </span>
           </button>
         </div>
 

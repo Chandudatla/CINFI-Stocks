@@ -141,7 +141,14 @@ export const MutualFundsDashboard: React.FC<MutualFundsDashboardProps> = ({
           `/api/mf/search?q=${encodeURIComponent(trimmed)}`
         );
         if (!cancelled) {
-          setSearchResults(Array.isArray(data.results) ? data.results : []);
+          setSearchResults(
+            Array.isArray(data.results)
+              ? data.results.map((r) => ({
+                  schemeCode: String(r.schemeCode),
+                  schemeName: r.schemeName,
+                }))
+              : []
+          );
         }
       } catch {
         if (!cancelled) setSearchResults([]);
@@ -316,7 +323,7 @@ export const MutualFundsDashboard: React.FC<MutualFundsDashboardProps> = ({
         onBack={onBack}
         modules={MODULE_CARDS}
         activeModule={activeTab}
-        onSelectModule={setActiveTab}
+        onSelectModule={(id) => setActiveTab(id as MfTab)}
       />
 
       {error && (

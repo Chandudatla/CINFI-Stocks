@@ -1,7 +1,11 @@
+import { handleStaticApiFallback } from './staticFallback';
+
 export interface FetchJsonError extends Error {
   status?: number;
   payload?: any;
 }
+
+const STATIC_FALLBACK_STATUSES = new Set([403, 404, 405, 501, 502, 503, 504]);
 
 export async function fetchJson<T = any>(
   input: string,
@@ -10,6 +14,7 @@ export async function fetchJson<T = any>(
   const { retries = 1, ...fetchInit } = init || {};
   const method = (fetchInit.method || 'GET').toUpperCase();
   const maxAttempts = method === 'GET' ? 1 + Math.max(0, retries) : 1;
+  const isApiPath = input.startsWith('/api/');
 
   let lastError: FetchJsonError | null = null;
 
@@ -26,6 +31,13 @@ export async function fetchJson<T = any>(
           isJson = true;
         } catch {
           isJson = false;
+        }
+      }
+
+      if (isApiPath && !isJson && (res.ok || STATIC_FALLBACK_STATUSES.has(res.status))) {
+        const fallback = await handleStaticApiFallback(input, fetchInit);
+        if (fallback !== null) {
+          return fallback as T;
         }
       }
 
@@ -65,6 +77,16 @@ export async function fetchJson<T = any>(
       if (attempt + 1 < maxAttempts && !err?.status) {
         await new Promise((r) => setTimeout(r, 450));
         continue;
+      }
+      if (isApiPath && !err?.status) {
+        try {
+          const fallback = await handleStaticApiFallback(input, fetchInit);
+          if (fallback !== null) {
+            return fallback as T;
+          }
+        } catch {
+          // Ignore fallback errors and surface original message
+        }
       }
       throw lastError;
     }

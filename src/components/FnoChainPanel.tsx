@@ -82,7 +82,7 @@ export const FnoChainPanel: React.FC<FnoChainPanelProps> = ({
   React.useEffect(() => {
     setOptionFocus(initialFocus);
   }, [initialFocus]);
-  const spot = underlying.price;
+  const spot = typeof underlying.price === 'number' && underlying.price > 0 ? underlying.price : 0;
   const step = underlying.levels?.step || (spot > 10000 ? 100 : spot > 1000 ? 20 : 10);
   const atmStrike = underlying.levels?.atmStrike || Math.round(spot / step) * step;
   const ivDecimal = Math.max(0.08, vixPrice / 100);
@@ -90,6 +90,7 @@ export const FnoChainPanel: React.FC<FnoChainPanelProps> = ({
   const r = 0.065;
 
   const chainRows = useMemo(() => {
+    if (spot <= 0) return [];
     const offsets = [-4, -3, -2, -1, 0, 1, 2, 3, 4];
     return offsets.map((off) => {
       const strike = atmStrike + off * step;
@@ -116,6 +117,19 @@ export const FnoChainPanel: React.FC<FnoChainPanelProps> = ({
       };
     });
   }, [spot, atmStrike, step, T, ivDecimal]);
+
+  if (spot <= 0 || chainRows.length === 0) {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 space-y-2">
+        <h2 className="text-base font-bold text-slate-900">
+          Option Chain, Implied Volatility &amp; Black-Scholes Greeks — {underlying.ticker}
+        </h2>
+        <p className="text-xs text-slate-600 leading-relaxed">
+          Live NSE spot quote is required to compute the real-time strike ladder, Black-Scholes option fair values, and Delta/Theta/Vega Greeks (Lot Size: {underlying.lotSize}). Official exchange option-chain links and F&amp;O AI research remain active.
+        </p>
+      </div>
+    );
+  }
 
   const totalCallOi = chainRows.reduce((a, b) => a + b.callOi, 0);
   const totalPutOi = chainRows.reduce((a, b) => a + b.putOi, 0);

@@ -210,6 +210,7 @@ export const SpecializedDashboards: React.FC<SpecializedDashboardsProps> = ({
     setSubFilter('All');
     setFlowFilter('all');
     setQuickFilter('');
+    setChartDetail(null);
     setChartSymbol(cfg.defaultChartSymbol);
     setChartRange(cfg.defaultRange);
     fetchDashboard(false);
@@ -665,26 +666,36 @@ export const SpecializedDashboards: React.FC<SpecializedDashboardsProps> = ({
           </h2>
           {chartDetail && (
             <div className="mt-1 flex flex-wrap items-center gap-3 font-mono tabular-nums">
-              <span className="text-xl font-bold text-slate-900">
-                {currencyPrefix}
-                {chartDetail.price.toLocaleString(isUsdAsset ? 'en-US' : 'en-IN', {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
-                {chartSymbol === '^TNX' ? '%' : ''}
-              </span>
-              <span
-                className={`inline-flex items-center text-xs font-semibold ${
-                  chartDetail.change >= 0 ? 'text-emerald-700' : 'text-rose-600'
-                }`}
-              >
-                {chartDetail.change >= 0 ? (
-                  <ArrowUpRight className="h-3.5 w-3.5" />
-                ) : (
-                  <ArrowDownRight className="h-3.5 w-3.5" />
-                )}
-                {formatSignedPercent(chartDetail.percentChange)}
-              </span>
+              {typeof chartDetail.price === 'number' ? (
+                <>
+                  <span className="text-xl font-bold text-slate-900">
+                    {currencyPrefix}
+                    {chartDetail.price.toLocaleString(isUsdAsset ? 'en-US' : 'en-IN', {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                    {chartSymbol === '^TNX' ? '%' : ''}
+                  </span>
+                  {typeof chartDetail.change === 'number' && (
+                    <span
+                      className={`inline-flex items-center text-xs font-semibold ${
+                        chartDetail.change >= 0 ? 'text-emerald-700' : 'text-rose-600'
+                      }`}
+                    >
+                      {chartDetail.change >= 0 ? (
+                        <ArrowUpRight className="h-3.5 w-3.5" />
+                      ) : (
+                        <ArrowDownRight className="h-3.5 w-3.5" />
+                      )}
+                      {formatSignedPercent(chartDetail.percentChange)}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <span className="text-xs font-sans font-medium text-slate-500">
+                  NSE live quote stream requires server runtime
+                </span>
+              )}
               {dashboardId === 'intraday' && chartDetail.vwap && (
                 <span className="text-xs text-slate-600">
                   VWAP ₹{chartDetail.vwap} · RSI {chartDetail.rsi14 ?? '—'} · MACD {chartDetail.macd ?? '—'}
@@ -715,7 +726,7 @@ export const SpecializedDashboards: React.FC<SpecializedDashboardsProps> = ({
       <PriceChart
         points={chartDetail?.points || []}
         range={chartRange}
-        previousClose={chartDetail?.previousClose}
+        previousClose={chartDetail?.previousClose ?? undefined}
         currencyPrefix={currencyPrefix}
         height={height}
         loading={chartLoading}
@@ -736,7 +747,7 @@ export const SpecializedDashboards: React.FC<SpecializedDashboardsProps> = ({
         onBack={onBack}
         modules={MODULE_CARDS}
         activeModule={activeModule}
-        onSelectModule={setActiveModule}
+        onSelectModule={(id) => setActiveModule(id as ModuleTab)}
       />
 
       {error && (
@@ -962,7 +973,7 @@ export const SpecializedDashboards: React.FC<SpecializedDashboardsProps> = ({
                       ))
                     ) : (
                       visibleItems.map((item: any) => {
-                        const pos = item.change >= 0;
+                        const pos = (item.change ?? 0) >= 0;
                         const isItemUsd =
                           item.currency === 'USD' ||
                           item.symbol?.includes('=F') ||
@@ -1020,21 +1031,33 @@ export const SpecializedDashboards: React.FC<SpecializedDashboardsProps> = ({
                               )}
                             </td>
                             <td className="py-3 px-3 text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">
-                              {itemPrefix}
-                              {item.price.toLocaleString(isItemUsd ? 'en-US' : 'en-IN', {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
-                              {item.symbol === '^TNX' ? '%' : ''}
+                              {typeof item.price === 'number' ? (
+                                <>
+                                  {itemPrefix}
+                                  {item.price.toLocaleString(isItemUsd ? 'en-US' : 'en-IN', {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}
+                                  {item.symbol === '^TNX' ? '%' : ''}
+                                </>
+                              ) : (
+                                '—'
+                              )}
                             </td>
                             <td
                               className={`py-3 px-3 text-right font-mono tabular-nums whitespace-nowrap ${
-                                pos ? 'text-emerald-700' : 'text-rose-600'
+                                item.change == null
+                                  ? 'text-slate-400'
+                                  : pos
+                                    ? 'text-emerald-700'
+                                    : 'text-rose-600'
                               }`}
                             >
-                              <div className="font-medium">{formatSignedPercent(item.percentChange)}</div>
+                              <div className="font-medium">
+                                {item.percentChange != null ? formatSignedPercent(item.percentChange) : '—'}
+                              </div>
                               <div className="text-xs opacity-80">
-                                {formatSignedChange(item.change, itemPrefix)}
+                                {item.change != null ? formatSignedChange(item.change, itemPrefix) : ''}
                               </div>
                             </td>
 
